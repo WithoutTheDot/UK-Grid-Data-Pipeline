@@ -1,6 +1,6 @@
 # UK Energy Grid Dashboard
 
-A side project I built to make sense of the UK electricity grid. I'm on Octopus Agile so prices change every 30 minutes — I wanted to know the best time to charge my EV or run the dishwasher without having to dig through spreadsheets. Ended up going a bit further than planned.
+A side project I built for a family friend who recently switched to Octopus Agile. Prices change every 30 minutes on Agile and they kept asking me when the best time was to charge their EV or run the dishwasher — so I figured I'd just build something rather than keep sending screenshots of spreadsheets. Ended up going a bit further than planned.
 
 It pulls live data from four free UK grid APIs, runs it through a small dbt pipeline into DuckDB, and serves it as a FastAPI dashboard. No cloud services, no paid APIs, no database server — just Python and a single file on disk.
 
@@ -10,7 +10,7 @@ It pulls live data from four free UK grid APIs, runs it through a small dbt pipe
 
 ## What it does
 
-- Shows the current Agile price, carbon intensity, and renewable % — with a simple 0–100 score for "is right now a good time to use electricity"
+- Shows the current Agile price, carbon intensity, and renewable % — with a simple 0–100 score for "is right now a good time to use electricity" (the main thing my family friend actually looks at)
 - Picks the cheapest, cleanest window to run an appliance (EV charge, washing machine, dishwasher, heat pump, or custom)
 - Shows the top 5 half-hour slots for today and tomorrow
 - Live generation mix — what's actually on the grid right now (wind, gas, nuclear, interconnectors, etc.)
@@ -32,7 +32,7 @@ It pulls live data from four free UK grid APIs, runs it through a small dbt pipe
 | Pipeline | dbt-core + dbt-duckdb |
 | Frontend | Vanilla JS + Chart.js, plain HTML — no build step |
 
-Deliberately kept it simple. No Node, no React, no Docker required.
+Deliberately kept it simple — my family friend just needs it to work in a browser, not require a degree to run.
 
 ---
 
@@ -116,7 +116,7 @@ carbon_rank = percent_rank() OVER (ORDER BY carbon ASC)
 score       = (price_rank + carbon_rank) / 2 × 100
 ```
 
-100 = cheapest and cleanest available. 0 = avoid.
+100 = cheapest and cleanest available. 0 = avoid. My family friend just looks at the colour and the number — which is kind of the point.
 
 ---
 
