@@ -2,7 +2,7 @@
 
 A consumer-facing smart energy dashboard for UK EV owners and smart home users. Shows live grid data — price, carbon intensity, and generation mix — and finds the cheapest, cleanest windows to run appliances. Includes user accounts, price/carbon alerts, and a savings tracker.
 
-![Dashboard screenshot](docs/screenshots/01-dashboard.png)
+<img src="docs/screenshots/01-dashboard.png" width="100%" alt="Dashboard" />
 
 ---
 
@@ -116,9 +116,17 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Screenshots
 
-| Dashboard | Schedule | Mobile |
-|-----------|----------|--------|
-| ![Dashboard](docs/screenshots/01-dashboard.png) | ![Schedule](docs/screenshots/02-schedule.png) | ![Mobile](docs/screenshots/05-mobile.png) |
+**Dashboard** — live signal, generation mix, price & carbon chart
+
+<img src="docs/screenshots/01-dashboard.png" width="100%" alt="Dashboard" />
+
+**Schedule** — appliance finder and best 30-minute windows
+
+<img src="docs/screenshots/02-schedule.png" width="100%" alt="Schedule tab" />
+
+**Mobile**
+
+<img src="docs/screenshots/05-mobile.png" width="390" alt="Mobile view" />
 
 ---
 
