@@ -1,6 +1,6 @@
 # UK Energy Grid Dashboard
 
-A consumer-facing smart energy dashboard for UK EV owners and smart home users. Shows live grid data — price, carbon intensity, and generation mix — and finds the cheapest, cleanest windows to run appliances. Includes user accounts, price/carbon alerts, and a savings tracker.
+A smart energy dashboard for UK EV owners and smart home users. Shows live grid data — Agile price, carbon intensity, and generation mix — and finds the cheapest, cleanest windows to run appliances.
 
 <img src="docs/screenshots/01-dashboard.png" width="100%" alt="Dashboard" />
 
@@ -23,13 +23,11 @@ A consumer-facing smart energy dashboard for UK EV owners and smart home users. 
 
 ## Features
 
-- **Live grid signal** — current Agile price (p/kWh), carbon intensity (gCO₂/kWh), renewable %, and a 0–100 "go now" score updated every 30 minutes
+- **Live grid signal** — current Agile price (p/kWh), carbon intensity (gCO₂/kWh), renewable %, and a 0–100 "go now" score, updated every 30 minutes
 - **Appliance scheduler** — pick an appliance and duration; the app finds the cheapest, cleanest window across the next 48 hours
-- **Best windows by day** — top 5 slots for today and tomorrow ranked by combined price + carbon score
-- **Charts** — price/carbon timeline, generation fuel mix donut, heatmap by hour-of-day and day-of-week, regional carbon map, renewable % trend, solar/wind index, temperature vs demand scatter
-- **Price & carbon alerts** — email notifications with quiet hours and 2-hour cooldown; optional Home Assistant webhook
-- **Savings tracker** — log EV charges or appliance runs; auto-calculates actual cost from live Agile prices vs daily average baseline
-- **User accounts** — bcrypt auth, 30-day session cookies, tariff settings (Agile or flat rate)
+- **Best windows by day** — top 5 half-hour slots for today and tomorrow, ranked by combined price + carbon score
+- **Generation mix** — live donut chart and fuel-group breakdown (renewables, fossil, interconnectors)
+- **Charts** — price/carbon timeline, hour × day-of-week heatmap, regional carbon map, renewable % trend, solar/wind index, temperature vs demand scatter
 - **Mobile-responsive** — works on phones and tablets
 
 ---
@@ -39,14 +37,11 @@ A consumer-facing smart energy dashboard for UK EV owners and smart home users. 
 | Layer | Technology |
 |-------|-----------|
 | Backend | FastAPI (Python 3.12), uvicorn |
-| Database | DuckDB (single file) |
+| Database | DuckDB (single embedded file) |
 | Data pipeline | dbt-core + dbt-duckdb |
 | Frontend | Vanilla JS + Chart.js 4.4, server-rendered HTML |
-| Auth | bcrypt (passlib) + session tokens |
-| Email alerts | smtplib (STARTTLS) |
-| HA integration | HTTP POST to user-configured webhook |
 
-No Node.js build step. No React. No external auth provider.
+No Node.js. No React. No auth provider. No database server.
 
 ---
 
@@ -54,9 +49,9 @@ No Node.js build step. No React. No external auth provider.
 
 - Python 3.12+
 - `pip` (system or virtualenv)
-- Internet access for the four upstream APIs (no API keys required — all are free/open)
+- Internet access for the four upstream APIs (all free, no API keys required)
 
-That's it. DuckDB is embedded; no database server to install or run.
+DuckDB is embedded — nothing else to install or run.
 
 ---
 
@@ -85,15 +80,15 @@ pip install -r requirements.txt
 
 ### 3. Run the data pipeline (first-time seed)
 
-This fetches live data from the four UK grid APIs and builds the DuckDB database:
+Fetches live data from the four UK grid APIs and builds the DuckDB database:
 
 ```bash
 bash run_pipeline.sh
 ```
 
-The pipeline runs `ingest/fetch_all.py` followed by `dbt run`. On a clean checkout it creates `energy.duckdb` from scratch. Expect it to take 10–20 seconds.
+Runs `ingest/fetch_all.py` then `dbt run`. On a clean checkout this creates `energy.duckdb` from scratch — expect 10–20 seconds.
 
-> **Cron:** To keep data fresh, schedule this to run every 30 minutes:
+> **Keep data fresh:** Schedule this every 30 minutes via cron:
 > ```
 > */30 * * * * cd /path/to/uk-energy-grid && bash run_pipeline.sh
 > ```
@@ -132,22 +127,11 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ## Environment Variables
 
-All variables are optional — the app runs with defaults out of the box.
+Only one variable is needed. The app runs without it — the database is created in the working directory by default.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `ENERGY_DB_PATH` | `./energy.duckdb` | Path to DuckDB file |
-| `SMTP_HOST` | `smtp.gmail.com` | Email server hostname |
-| `SMTP_PORT` | `587` | Email port (STARTTLS) |
-| `SMTP_USER` | *(unset)* | Gmail address for alert emails |
-| `SMTP_PASS` | *(unset)* | App password — if unset, alerts log to console only |
-
-To enable email alerts, create a `.env` file (or export the vars):
-
-```bash
-SMTP_USER=you@gmail.com
-SMTP_PASS=your-app-password   # Google → Security → App Passwords
-```
 
 ---
 
@@ -155,8 +139,8 @@ SMTP_PASS=your-app-password   # Google → Security → App Passwords
 
 ### Sources
 
-| Source | Data | Refresh cadence |
-|--------|------|----------------|
+| Source | Data | Cadence |
+|--------|------|---------|
 | [Elexon BMRS](https://bmrs.elexon.co.uk/) | Half-hourly generation by fuel type | 30 min |
 | [Open-Meteo](https://open-meteo.com/) | Hourly weather — Birmingham (52.48°N, 1.90°W) | 30 min |
 | [Carbon Intensity API](https://carbonintensity.org.uk/) | National + regional carbon intensity & 48h forecast | 30 min |
@@ -205,9 +189,7 @@ uk-energy-grid/
 ├── dashboard/
 │   ├── app.py                  ← FastAPI app — all backend logic
 │   └── templates/
-│       ├── index.html          ← Single-page app (tabs, charts, JS)
-│       ├── login.html
-│       └── signup.html
+│       └── index.html          ← Single-page app (3 tabs, charts, JS)
 ├── ingest/
 │   └── fetch_all.py            ← Pulls from 4 APIs → bronze tables
 ├── models/
@@ -226,80 +208,66 @@ uk-energy-grid/
 ### Request flow
 
 ```
-Browser → FastAPI route → DuckDB query (gold marts) → JSON response → Chart.js render
+Browser → FastAPI route → DuckDB query (gold marts) → JSON → Chart.js render
 ```
 
-The frontend is a single `index.html` file (~2,400 lines). It uses vanilla JS with no build step — tabs lazy-load their data on first visit, everything else loads at boot.
+The frontend is a single `index.html` file. Vanilla JS, no build step. Three tabs:
 
-### Alert background task
+| Tab | Content |
+|-----|---------|
+| **Dashboard** | Hero signal, generation mix donut, fuel breakdown, price/carbon chart, heatmap, advanced charts |
+| **Schedule** | Appliance finder, best 30-min windows for today / tomorrow |
+| **About** | Fuel type explainer, metrics glossary, data sources |
 
-`_alert_checker_loop()` runs as an asyncio task inside the FastAPI lifespan. Every 30 minutes it:
+### Database schema
 
-1. Reads current grid state from `/api/now`
-2. Checks all enabled user alerts against their thresholds
-3. Respects 2-hour cooldown (`last_fired_at`) and quiet hours
-4. Sends email via SMTP if configured; always fires HA webhook if set
+All data is written by the dbt pipeline into DuckDB:
 
-### Database schemas
-
-**Energy data** (written by dbt): `main_bronze.*`, `main_silver.*`, `main_gold.*`
-
-**App data** (written by FastAPI, in `app` schema):
-
-```sql
-app.users           -- id, email, password_hash (bcrypt), created_at
-app.user_sessions   -- token, user_id, expires_at (30 days)
-app.user_alerts     -- alert_type, threshold, quiet_from/to, last_fired_at
-app.user_settings   -- tariff_type, flat_rate, ha_webhook_url
-app.usage_log       -- device_name, kwh, cost_actual, cost_optimal
+```
+main_bronze.*   — raw ingested rows (views)
+main_silver.*   — cleaned, deduplicated staging models
+main_gold.*     — aggregated mart tables queried by the API
 ```
 
 ---
 
 ## API Reference
 
-### Public endpoints
+All endpoints are public — no authentication required.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/now` | Current price, carbon, renewable %, score, next best window |
 | `GET` | `/api/windows-by-day` | Top 5 windows for today + tomorrow |
-| `GET` | `/api/appliance-windows?hours=X` | Best windows for an X-hour block |
+| `GET` | `/api/appliance-windows?hours=X` | Best windows for an X-hour appliance block |
 | `GET` | `/api/prices-carbon` | Last 200 half-hourly price + carbon rows |
 | `GET` | `/api/combined-heatmap` | Price+carbon score by hour × day-of-week |
 | `GET` | `/api/best-windows` | Top 10 future windows |
 | `GET` | `/api/fuel-mix` | Last 48h generation by fuel type |
 | `GET` | `/api/renewable-mix` | Last 30 days renewable % + weather |
-| `GET` | `/api/regional-carbon` | Current carbon by UK region |
+| `GET` | `/api/regional-carbon` | Current carbon intensity by UK region |
+| `GET` | `/api/solar-weather` | Solar/wind index + weather data |
+| `GET` | `/api/temp-vs-demand` | Temperature vs grid demand scatter data |
+| `GET` | `/api/demand-profile` | Average demand by hour-of-day, weekday vs weekend |
+| `GET` | `/api/grid-stress` | Last 7 days grid stress events |
+| `GET` | `/api/interconnectors` | Last 48h interconnector flows |
 | `GET` | `/api/kpi` | Summary KPIs |
-
-### Auth-gated endpoints (require `session` cookie)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/alerts` | List user's alerts |
-| `POST` | `/api/alerts` | Create alert |
-| `PATCH` | `/api/alerts/{id}/toggle` | Enable/disable alert |
-| `GET` | `/api/savings` | Last 50 charge logs |
-| `POST` | `/api/savings` | Log a new charge |
-| `GET` | `/api/savings/summary` | Total/weekly/monthly savings |
-| `GET/POST` | `/api/settings` | Get or update tariff + HA webhook |
 
 ---
 
 ## Deployment
 
-The app is a single Python process with an embedded database — no separate database server, no message queue, no cache layer needed.
+The app is a single Python process with an embedded database — no database server, message queue, or cache layer needed.
 
 ### Railway / Fly.io / Render
 
 1. Push to GitHub
 2. Connect repo to your platform
 3. Set start command: `python3 -m uvicorn dashboard.app:app --host 0.0.0.0 --port 8000`
-4. Set environment variables (`SMTP_USER`, `SMTP_PASS`, optionally `ENERGY_DB_PATH`)
-5. Add a scheduled job (cron) to run `bash run_pipeline.sh` every 30 minutes
+4. Optionally set `ENERGY_DB_PATH` to point at a persistent volume
+5. Add a scheduled job to run `bash run_pipeline.sh` every 30 minutes
 
-> **Note on DuckDB and persistent storage:** DuckDB writes to a local file. On platforms with ephemeral filesystems (Fly.io, Render free tier), mount a persistent volume at the path set by `ENERGY_DB_PATH`. On Railway, use a volume or switch to the managed PostgreSQL addon with a DuckDB-compatible layer.
+> **Persistent storage:** DuckDB writes to a local file. On platforms with ephemeral filesystems (Fly.io, Render free tier), mount a persistent volume and set `ENERGY_DB_PATH` to that path.
 
 ### VPS / bare metal
 
@@ -312,8 +280,7 @@ pip install -r requirements.txt --break-system-packages
 # Seed data
 bash run_pipeline.sh
 
-# Run via systemd (example unit file)
-# /etc/systemd/system/ukenergy.service
+# Example systemd unit: /etc/systemd/system/ukenergy.service
 [Unit]
 Description=UK Energy Grid Dashboard
 After=network.target
@@ -331,7 +298,7 @@ WantedBy=multi-user.target
 sudo systemctl enable ukenergy
 sudo systemctl start ukenergy
 
-# Add cron for pipeline
+# Cron for pipeline
 crontab -e
 # */30 * * * * cd /opt/uk-energy-grid && bash run_pipeline.sh
 ```
@@ -346,15 +313,18 @@ Run the pipeline manually and check for errors:
 ```bash
 bash run_pipeline.sh
 ```
-If the pipeline fails, check API availability — all four sources are external. The Octopus Agile endpoint only publishes prices 48h ahead; historical periods beyond that will show `null`.
+All four data sources are external — check API availability if it fails. The Octopus Agile endpoint only publishes prices 48h ahead; periods beyond that will show `null`.
 
 **`energy.duckdb` not found**
 
-The database is created by `run_pipeline.sh` on first run. Make sure you run the pipeline before starting the app.
+The database is created by `run_pipeline.sh` on first run. Run the pipeline before starting the app.
 
 **dbt not found when running pipeline**
 
-dbt installs to `~/.local/bin/` which may not be on `PATH` in cron. The pipeline script uses the full path `/home/$USER/.local/bin/dbt`. If your install location differs, update `run_pipeline.sh` accordingly.
+dbt installs to `~/.local/bin/` which may not be on `PATH` in cron. The pipeline script uses the full path. If your install location differs, update `run_pipeline.sh`:
+```bash
+which dbt   # find the actual path
+```
 
 **Port already in use**
 
@@ -363,15 +333,9 @@ lsof -i :8000
 kill -9 <PID>
 ```
 
-**SMTP alerts not sending**
-
-- Confirm `SMTP_USER` and `SMTP_PASS` are set
-- Use a [Google App Password](https://support.google.com/accounts/answer/185833), not your main Gmail password
-- Check `pipeline.log` — alert fire attempts are logged there
-
 **Duplicate rows in API responses**
 
-All gold mart queries use `GROUP BY period_utc, AVG()` to handle the full-outer-join duplicates in `mart_price_carbon`. If you write custom queries, always group rather than using `LIMIT 1`.
+All gold mart queries use `GROUP BY period_utc, AVG()` to handle duplicates from the full-outer-join in `mart_price_carbon`. If writing custom queries, always group rather than using `LIMIT 1`.
 
 ---
 
