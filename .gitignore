@@ -1,0 +1,46 @@
+# Database — large binary, rebuilt from pipeline
+energy.duckdb
+*.duckdb
+
+# dbt build artifacts
+target/
+dbt_packages/
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Claude Code
+.claude/
+.user.yml
+.playwright-mcp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# PDF brief (not source code)
+*.pdf

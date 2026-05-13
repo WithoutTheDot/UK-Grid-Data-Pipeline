@@ -1,0 +1,109 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: bronze
+    tables:
+      - name: raw_generation
+        description: Raw half-hourly generation output by fuel type from Elexon BMRS
+        columns:
+          - name: settlement_date
+          - name: settlement_period
+          - name: fuel_type
+          - name: generation
+          - name: loaded_at
+      - name: raw_weather
+        description: Raw hourly weather data from Open-Meteo (Birmingham anchor point)
+        columns:
+          - name: time
+          - name: temperature_2m
+          - name: windspeed_10m
+          - name: loaded_at
+      - name: raw_carbon
+        description: Raw regional carbon intensity from National Grid ESO
+        columns:
+          - name: regionid
+          - name: shortname
+          - name: intensity_actual
+          - name: generationmix
+          - name: loaded_at
+      - name: raw_prices
+        description: Octopus Agile half-hourly electricity prices in p/kWh inc VAT
+      - name: raw_carbon_national
+        description: National Grid national carbon intensity actual + forecast
+
+models:
+  - name: stg_generation
+    description: Cleaned generation data with typed columns and UTC timestamps
+    columns:
+      - name: settlement_key
+        description: Surrogate key (date_period)
+        tests:
+          - not_null
+          - unique
+      - name: settlement_date
+        tests: [not_null]
+      - name: fuel_type
+        tests: [not_null]
+      - name: generation_mw
+        tests: [not_null]
+
+  - name: stg_weather
+    description: Cleaned hourly weather aligned to UTC
+    columns:
+      - name: hour_utc
+        description: Truncated to hour
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_prices
+    description: Cleaned Octopus Agile half-hourly prices
+    columns:
+      - name: price_key
+        tests: [not_null, unique]
+      - name: value_inc_vat
+        tests: [not_null]
+
+  - name: stg_carbon_national
+    description: National carbon intensity with forecast values
+    columns:
+      - name: period_key
+        tests: [not_null, unique]
+
+  - name: stg_carbon
+    description: Regional carbon intensity joined to region lookup
+    columns:
+      - name: carbon_key
+        tests: [not_null]
+      - name: intensity_actual
+        tests: [not_null]
+
+  - name: mart_temp_vs_demand
+    description: Hourly total grid demand joined with temperature for correlation analysis
+    columns:
+      - name: hour_utc
+        tests: [not_null, unique]
+      - name: day_type
+        tests:
+          - accepted_values:
+              values: ['weekday', 'weekend']
+
+  - name: mart_renewable_mix
+    description: Hourly renewable percentage with 7-day rolling average
+    columns:
+      - name: hour_utc
+        tests: [not_null, unique]
+      - name: renewable_pct
+        tests:
+          - not_null
+
+  - name: mart_carbon_heatmap
+    description: Average carbon intensity aggregated by hour-of-day and day-of-week
+    columns:
+      - name: hour_of_day
+        tests: [not_null]
+      - name: day_of_week
+        tests: [not_null]
+      - name: avg_intensity_gco2kwh
+        tests: [not_null]

@@ -1,0 +1,1836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UK Energy Grid Analytics</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #f8fafc;
+      --surface:  #ffffff;
+      --border:   #e2e8f0;
+      --muted:    #94a3b8;
+      --text:     #0f172a;
+      --dim:      #475569;
+
+      --wind:     #4ade80;
+      --nuclear:  #a78bfa;
+      --ccgt:     #f97316;
+      --biomass:  #84cc16;
+      --hydro:    #06b6d4;
+      --solar:    #fbbf24;
+      --coal:     #64748b;
+      --interconn:#818cf8;
+      --other:    #475569;
+      --ocgt:     #fb923c;
+      --oil:      #374151;
+      --ps:       #22d3ee;
+    }
+
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Header ─────────────────────────────────── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; }
+    header h1 span { color: #16a34a; }
+    #last-updated { font-size: 0.72rem; color: var(--muted); }
+
+    /* ── KPI bar ─────────────────────────────────── */
+    .kpi-bar {
+      display: flex; flex-wrap: wrap; gap: 1rem;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .kpi {
+      flex: 1; min-width: 140px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.9rem 1.2rem;
+    }
+    .kpi-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .kpi-value { font-size: 1.9rem; font-weight: 700; margin-top: .15rem; }
+    .kpi-sub   { font-size: 0.7rem; color: var(--muted); margin-top: .1rem; }
+    .kpi-value.blue   { color: #38bdf8; }
+    .kpi-value.green  { color: #4ade80; }
+    .kpi-value.yellow { color: #fbbf24; }
+    .kpi-value.red    { color: #f87171; }
+    .kpi-value.purple { color: #a78bfa; }
+
+    /* ── Grid ────────────────────────────────────── */
+    .section { padding: .5rem 2rem 0; }
+    .section-title {
+      font-size: .7rem; text-transform: uppercase; letter-spacing: .1em;
+      color: var(--muted); margin-bottom: .75rem; margin-top: 1.25rem;
+    }
+    .grid { display: grid; gap: 1.25rem; margin-bottom: 1.25rem; }
+    .grid-1   { grid-template-columns: 1fr; }
+    .grid-2   { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+    .grid-3   { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.1rem 1.3rem;
+    }
+    .card h2 {
+      font-size: .78rem; font-weight: 600; color: var(--dim);
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: .2rem;
+    }
+    .card p.sub { font-size: .7rem; color: var(--muted); margin-bottom: .9rem; }
+
+    .chart-wrap          { position: relative; height: 280px; }
+    .chart-wrap.tall     { height: 340px; }
+    .chart-wrap.short    { height: 200px; }
+    .chart-wrap.heatmap  { height: 230px; }
+
+    .no-data { color: #f87171; font-size: .78rem; padding: .5rem 0; }
+
+    /* ── Fuel legend swatches ───────────────────── */
+    .legend { display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-bottom: .7rem; }
+    .legend-item { display: flex; align-items: center; gap: .35rem; font-size: .7rem; color: var(--dim); cursor: pointer; }
+    .swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+    /* ── Regional leaderboard ───────────────────── */
+
+    /* ── Best windows ────────────────────────────────── */
+    .best-windows-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem; margin-bottom: .5rem;
+    }
+    .window-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1rem 1.2rem;
+      border-top: 3px solid var(--border);
+      transition: border-color .2s;
+    }
+    .window-card.excellent { border-top-color: #4ade80; }
+    .window-card.good      { border-top-color: #38bdf8; }
+    .window-card.fair      { border-top-color: #fbbf24; }
+    .window-card.poor      { border-top-color: #f87171; }
+    .window-rank  { font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .window-time  { font-size: 1.5rem; font-weight: 700; color: #0f172a; margin: .2rem 0; }
+    .window-score { font-size: .75rem; color: var(--dim); margin-bottom: .5rem; }
+    .window-stats { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: .5rem; }
+    .window-stat  { font-size: .75rem; }
+    .window-stat strong { display: block; font-size: 1rem; font-weight: 700; }
+    .window-stat .lbl  { color: var(--muted); font-size: .65rem; }
+    .window-rec   { font-size: .72rem; color: var(--dim); font-style: italic; border-top: 1px solid var(--border); padding-top: .5rem; margin-top: .3rem; }
+
+    /* ── Hero signal ─────────────────────────────────────── */
+    .hero {
+      padding: 1.75rem 2rem;
+      border-bottom: 1px solid var(--border);
+      border-left: 5px solid transparent;
+      transition: background .4s, border-color .4s;
+    }
+    .hero.excellent { background: linear-gradient(120deg,#f0fdf4 0%,#ffffff 60%); border-left-color:#22c55e; }
+    .hero.good      { background: linear-gradient(120deg,#eff6ff 0%,#ffffff 60%); border-left-color:#38bdf8; }
+    .hero.fair      { background: linear-gradient(120deg,#fefce8 0%,#ffffff 60%); border-left-color:#fbbf24; }
+    .hero.poor      { background: linear-gradient(120deg,#fff1f2 0%,#ffffff 60%); border-left-color:#f87171; }
+
+    .hero-inner { display:flex; align-items:center; gap:2.5rem; flex-wrap:wrap; }
+
+    .hero-signal { flex:1; min-width:220px; }
+    .hero-eyebrow { font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-bottom:.2rem; }
+    .hero-word  { font-size:2.6rem; font-weight:800; line-height:1; margin-bottom:.5rem; }
+    .hero.excellent .hero-word { color:#16a34a; }
+    .hero.good      .hero-word { color:#0284c7; }
+    .hero.fair      .hero-word { color:#d97706; }
+    .hero.poor      .hero-word { color:#dc2626; }
+
+    .hero-bar-wrap { background:#e2e8f0; border-radius:99px; height:7px; width:180px; margin-bottom:.35rem; }
+    .hero-bar { height:7px; border-radius:99px; transition:width .7s ease; }
+    .hero.excellent .hero-bar { background:#22c55e; }
+    .hero.good      .hero-bar { background:#38bdf8; }
+    .hero.fair      .hero-bar { background:#fbbf24; }
+    .hero.poor      .hero-bar { background:#f87171; }
+
+    .hero-score-txt { font-size:.68rem; color:var(--muted); margin-bottom:.5rem; }
+    .hero-rec { font-size:.85rem; color:var(--dim); }
+
+    .hero-stats { display:flex; gap:2rem; }
+    .hero-stat-val { font-size:1.9rem; font-weight:700; color:var(--text); line-height:1; }
+    .hero-stat-lbl { font-size:.62rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-top:.15rem; }
+
+    .hero-next {
+      border-left:1px solid var(--border); padding-left:2rem; min-width:170px;
+    }
+    .hero-next-lbl  { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:.3rem; }
+    .hero-next-time { font-size:1.8rem; font-weight:700; color:var(--text); }
+    .hero-next-sub  { font-size:.72rem; color:var(--muted); margin-top:.25rem; line-height:1.5; }
+
+    /* ── Explainer strip ─────────────────────────────────── */
+    .explainer {
+      padding: .75rem 2rem;
+      font-size: .82rem; color: var(--dim); line-height: 1.6;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    /* ── Section title row (title + day tabs inline) ────── */
+    .section-title-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: .75rem; margin-top: 1.25rem;
+    }
+    .section-title-row .section-title { margin: 0; }
+    .day-tabs { display: flex; gap: .3rem; }
+    .day-tab {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); font-size: .75rem; cursor: pointer;
+      padding: .3rem .85rem; border-radius: 99px;
+      transition: color .15s, background .15s, border-color .15s;
+    }
+    .day-tab:hover  { color: var(--text); border-color: var(--muted); }
+    .day-tab.active { background: #0f172a; color: #f8fafc; border-color: #0f172a; }
+
+    /* ── Appliance finder ────────────────────────────────── */
+    .a-pills { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.1rem; }
+    .a-pill {
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--dim); font-size: .82rem; cursor: pointer;
+      padding: .45rem 1rem; border-radius: 99px;
+      transition: all .15s;
+    }
+    .a-pill:hover  { border-color: var(--muted); color: var(--text); }
+    .a-pill.active { background: #0f172a; color: #f8fafc; border-color: #0f172a; }
+
+    .a-custom-row {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      margin-bottom: 1rem; font-size: .8rem; color: var(--dim);
+    }
+    .a-custom-row input {
+      width: 70px; padding: .3rem .5rem; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--bg); color: var(--text);
+      font-size: .8rem;
+    }
+    .a-custom-row button {
+      padding: .35rem .9rem; background: #0f172a; color: #f8fafc;
+      border: none; border-radius: 6px; cursor: pointer; font-size: .78rem;
+    }
+
+    .a-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .a-result-grid { grid-template-columns: 1fr; } }
+
+    .a-best {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1rem 1.2rem; border-top: 3px solid #22c55e;
+    }
+    .a-best-rank  { font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .a-best-time  { font-size: 1.6rem; font-weight: 700; color: var(--text); margin: .2rem 0 .1rem; }
+    .a-best-score { font-size: .72rem; color: var(--muted); margin-bottom: .5rem; }
+    .a-best-stats { display: flex; gap: 1rem; font-size: .78rem; color: var(--dim); margin-bottom: .6rem; flex-wrap: wrap; }
+    .a-savings {
+      font-size: .8rem; background: #f0fdf4; border: 1px solid #bbf7d0;
+      border-radius: 6px; padding: .45rem .75rem; color: #15803d; line-height: 1.5;
+    }
+    .a-savings strong { font-weight: 700; }
+
+    .a-alts { display: flex; flex-direction: column; gap: .5rem; }
+    .a-alt {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: .65rem 1rem; display: flex; align-items: center; gap: .75rem;
+      font-size: .78rem;
+    }
+    .a-alt-rank  { font-weight: 700; color: var(--muted); width: 22px; flex-shrink: 0; }
+    .a-alt-time  { font-weight: 600; color: var(--text); width: 110px; flex-shrink: 0; }
+    .a-alt-stats { color: var(--muted); }
+    .a-alt-score { margin-left: auto; font-size: .7rem; color: var(--muted); flex-shrink: 0; }
+
+    /* ── Advanced toggle ─────────────────────────────────── */
+    .advanced-toggle-row {
+      display: flex; justify-content: center;
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .advanced-toggle-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); font-size: .8rem; cursor: pointer;
+      padding: .5rem 1.25rem; border-radius: 99px;
+      transition: color .15s, border-color .15s;
+    }
+    .advanced-toggle-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ── Mobile ──────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      header { padding: 1rem; }
+      header h1 { font-size: 1.1rem; }
+      .hero { padding: 1.25rem 1rem; }
+      .hero-inner { gap: 1.25rem; }
+      .hero-word { font-size: 2rem; }
+      .hero-stats { gap: 1.25rem; }
+      .hero-stat-val { font-size: 1.5rem; }
+      .hero-next { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: .75rem; width: 100%; }
+      .kpi-bar { padding: .75rem 1rem; }
+      .section { padding: .5rem 1rem 0; }
+      .best-windows-grid { grid-template-columns: 1fr 1fr; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .explainer { padding: .75rem 1rem; }
+      .tab-bar { padding: 0 1rem; }
+      .info-page { padding: 1.25rem 1rem; }
+      .term-row { grid-template-columns: 1fr; gap: .25rem; }
+    }
+
+    footer {
+      text-align: center; padding: 1.5rem; font-size: .68rem; color: var(--muted);
+      border-top: 1px solid var(--border); margin-top: 1rem;
+    }
+
+    /* ── Tabs ───────────────────────────────────── */
+    .tab-bar {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+    }
+    .tab-btn {
+      background: none; border: none; color: var(--muted);
+      font-size: .85rem; font-weight: 500; cursor: pointer;
+      padding: .75rem 1.25rem; border-bottom: 2px solid transparent;
+      margin-bottom: -1px; transition: color .15s, border-color .15s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: #16a34a; border-bottom-color: #16a34a; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Placeholder panels ──────────────────────────── */
+    .placeholder-panel {
+      max-width: 560px; margin: 4rem auto; text-align: center;
+      padding: 0 1.5rem;
+    }
+    .placeholder-icon {
+      width: 64px; height: 64px; border-radius: 16px;
+      background: #f0fdf4; display: flex; align-items: center;
+      justify-content: center; margin: 0 auto 1.25rem;
+      font-size: 28px;
+    }
+    .placeholder-panel h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: .5rem; }
+    /* ── Info page ───────────────────────────────── */
+    .info-page { max-width: 900px; margin: 0 auto; padding: 2rem; }
+    .info-page h2 { font-size: 1.1rem; color: #0f172a; margin: 2rem 0 .75rem; border-bottom: 1px solid var(--border); padding-bottom: .4rem; }
+    .info-page h2:first-child { margin-top: 0; }
+
+    /* ── Grid snapshot panels ───────────────────────── */
+    .snapshot-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 1.25rem;
+      margin-bottom: 1.25rem;
+      align-items: start;
+      max-width: 1100px;
+    }
+    @media (max-width: 760px) {
+      .snapshot-layout { grid-template-columns: 1fr; }
+    }
+    .snapshot-col { display: flex; flex-direction: column; gap: .75rem; }
+    .snapshot-groups-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem;
+    }
+    @media (max-width: 640px) {
+      .snapshot-groups-grid { grid-template-columns: 1fr; }
+    }
+
+    .fuel-group {
+      border-radius: 10px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .fuel-group-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .55rem .9rem;
+      font-size: .8rem; font-weight: 700; color: #fff;
+    }
+    .fuel-group-head.fossil   { background: #b91c1c; }
+    .fuel-group-head.renewable{ background: #15803d; }
+    .fuel-group-head.other    { background: #1d4ed8; }
+    .fuel-group-head.storage  { background: #475569; }
+    .fuel-group-head.interconn{ background: #475569; }
+    .fuel-group-head-note     { font-size: .68rem; font-weight: 400; opacity: .85; }
+
+    .fuel-row {
+      display: flex; align-items: center; gap: .6rem;
+      padding: .42rem .9rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      font-size: .8rem;
+    }
+    .fuel-row-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(0,0,0,.08); }
+    .fuel-row-name   { flex: 1; color: var(--dim); }
+    .fuel-row-gw     { width: 55px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+    .fuel-row-pct    { width: 40px; text-align: right; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
+    .fuel-row.negative .fuel-row-gw  { color: #dc2626; }
+    .snapshot-note   { font-size: .67rem; color: var(--muted); line-height: 1.5; margin-top: .25rem; }
+
+    .fuel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .75rem; }
+    .fuel-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: .9rem 1.1rem;
+      border-left: 3px solid var(--border);
+    }
+    .fuel-card-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .4rem; }
+    .fuel-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+    .fuel-name { font-weight: 600; font-size: .88rem; color: #0f172a; }
+    .fuel-tag  { font-size: .65rem; text-transform: uppercase; letter-spacing: .07em;
+                 background: var(--border); color: var(--dim); padding: .15rem .45rem; border-radius: 4px; margin-left: auto; }
+    .fuel-desc { font-size: .78rem; color: var(--dim); line-height: 1.55; }
+
+    .term-list { display: flex; flex-direction: column; gap: .6rem; }
+    .term-row  { display: grid; grid-template-columns: 200px 1fr; gap: 1rem; font-size: .8rem; }
+    .term-key  { color: #38bdf8; font-weight: 600; }
+    .term-val  { color: var(--dim); line-height: 1.5; }
+
+    .info-note {
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+      padding: .85rem 1.1rem; font-size: .78rem; color: #1d4ed8; line-height: 1.55;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>UK Energy <span>Grid</span></h1>
+  <span id="last-updated">loading…</span>
+</header>
+
+<!-- TAB BAR -->
+<div class="tab-bar">
+  <button class="tab-btn active" id="nav-dashboard" onclick="switchTab('dashboard', this)">Dashboard</button>
+  <button class="tab-btn"        id="nav-schedule"  onclick="switchTab('schedule', this)">Schedule</button>
+  <button class="tab-btn"        id="nav-about"     onclick="switchTab('about', this)">About</button>
+</div>
+
+<div id="tab-dashboard" class="tab-panel active">
+
+<!-- HERO SIGNAL -->
+<div class="hero" id="hero-section">
+  <div class="hero-inner">
+    <div class="hero-signal">
+      <div class="hero-eyebrow">Right now</div>
+      <div class="hero-word" id="hero-word">—</div>
+      <div class="hero-bar-wrap"><div class="hero-bar" id="hero-bar" style="width:0%"></div></div>
+      <div class="hero-score-txt" id="hero-score">Loading…</div>
+      <div class="hero-rec" id="hero-rec"></div>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="hero-stat-val" id="hero-price">—</div>
+        <div class="hero-stat-lbl">p / kWh</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-val" id="hero-carbon">—</div>
+        <div class="hero-stat-lbl">gCO₂ / kWh</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-val" id="hero-renew">—</div>
+        <div class="hero-stat-lbl">% renewable</div>
+      </div>
+    </div>
+    <div class="hero-next" id="hero-next-wrap">
+      <div class="hero-next-lbl">Next best window</div>
+      <div class="hero-next-time" id="hero-next-time">—</div>
+      <div class="hero-next-sub" id="hero-next-sub"></div>
+    </div>
+  </div>
+</div>
+
+<!-- KPI BAR (hidden — data still loaded for legacy compat) -->
+<div class="kpi-bar" style="display:none">
+  <div class="kpi">
+    <div class="kpi-label">Cleanest Hour Today</div>
+    <div class="kpi-value blue" id="kv-hour">—</div>
+    <div class="kpi-sub">highest renewable %</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Renewable % (peak)</div>
+    <div class="kpi-value green" id="kv-pct">—</div>
+    <div class="kpi-sub">7-day avg: <span id="kv-7d">—</span></div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Current Price</div>
+    <div class="kpi-value yellow" id="kv-price">—</div>
+    <div class="kpi-sub">Octopus Agile p/kWh</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Avg Carbon Intensity</div>
+    <div class="kpi-value purple" id="kv-carbon">—</div>
+    <div class="kpi-sub">gCO₂/kWh national avg</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Avg Demand Today</div>
+    <div class="kpi-value blue" id="kv-demand">—</div>
+    <div class="kpi-sub">peak: <span id="kv-peak">—</span> GW</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Grid Stress Hours</div>
+    <div class="kpi-value red" id="kv-stress">—</div>
+    <div class="kpi-sub">last 7 days</div>
+  </div>
+</div>
+
+<!-- CURRENT GRID SNAPSHOT -->
+<div class="section">
+  <div class="section-title">Current grid snapshot</div>
+  <div class="snapshot-layout">
+    <div class="card">
+      <h2>Generation mix</h2>
+      <p class="sub">Right now — hover for details</p>
+      <div class="chart-wrap"><canvas id="chart-donut"></canvas></div>
+      <p class="snapshot-note">% relative to demand — may exceed 100% when UK is exporting.</p>
+    </div>
+    <div class="snapshot-groups-grid" id="snapshot-all">
+      <div class="snapshot-col" id="snapshot-groups">
+        <div class="fuel-group"><div class="fuel-group-head fossil">Loading…</div></div>
+      </div>
+      <div class="snapshot-col" id="snapshot-side">
+        <div class="fuel-group"><div class="fuel-group-head interconn">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 1: PRICE + CARBON -->
+<div class="section">
+  <div class="section-title">Price &amp; carbon over time</div>
+  <div class="grid grid-1">
+    <div class="card">
+      <h2>Agile Price vs Carbon Intensity</h2>
+      <p class="sub">Half-hourly Octopus Agile p/kWh (left) and gCO₂/kWh (right) — spot cheap+clean windows</p>
+      <div class="chart-wrap tall"><canvas id="chart-price-carbon"></canvas></div>
+    </div>
+  </div>
+  <div class="grid grid-1">
+    <div class="card">
+      <h2>Best times to use electricity — Hour × Day</h2>
+      <p class="sub">Combined price + carbon score — green = cheap &amp; clean, red = expensive &amp; dirty</p>
+      <div class="chart-wrap heatmap"><canvas id="chart-combined-heatmap"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- ADVANCED TOGGLE -->
+<div class="advanced-toggle-row">
+  <button class="advanced-toggle-btn" id="advanced-toggle-btn" onclick="toggleAdvanced()">
+    Show advanced charts ↓
+  </button>
+</div>
+
+<div id="advanced-panel" style="display:none">
+
+<!-- SECTION 2: WEATHER -->
+<div class="section">
+  <div class="section-title">What's driving the grid today</div>
+  <div class="grid grid-1">
+    <div class="card">
+      <h2>Solar &amp; Wind Potential</h2>
+      <p class="sub">Solar index (direct radiation × cloud cover) and wind power index — what's driving renewable output</p>
+      <div class="chart-wrap"><canvas id="chart-solar-wind"></canvas></div>
+    </div>
+  </div>
+  <div class="grid grid-3">
+    <div class="card">
+      <h2>Temperature &amp; Precipitation</h2>
+      <p class="sub">°C and mm/hr over last 48h + forecast</p>
+      <div class="chart-wrap short"><canvas id="chart-temp-precip"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Cloud Cover</h2>
+      <p class="sub">% cloudcover — inversely drives solar generation</p>
+      <div class="chart-wrap short"><canvas id="chart-cloud"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Wind Direction</h2>
+      <p class="sub">Degrees — Atlantic westerlies bring high wind output</p>
+      <div class="chart-wrap short"><canvas id="chart-wind-dir"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 3: GENERATION MIX -->
+<div class="section">
+  <div class="section-title">Where your electricity comes from</div>
+  <div class="grid grid-1">
+    <div class="card">
+      <h2>Fuel Mix — Stacked Area (last 48h)</h2>
+      <p class="sub">Hourly MW by fuel type — toggle fuels in legend</p>
+      <div class="legend" id="fuel-legend"></div>
+      <div class="chart-wrap tall"><canvas id="chart-fuel-mix"></canvas></div>
+    </div>
+  </div>
+  <div class="grid grid-1">
+    <div class="card">
+      <h2>Interconnector Flows — Last 48h</h2>
+      <p class="sub">MW per link · above zero = UK importing · below zero = UK exporting</p>
+      <div class="chart-wrap"><canvas id="chart-interconn"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 4: DEMAND & CORRELATION -->
+<div class="section">
+  <div class="section-title">Demand &amp; Correlation</div>
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Renewable % · Wind Speed · Temperature</h2>
+      <p class="sub">Renewable % (left axis) · wind speed km/h (right axis) · temp °C overlaid</p>
+      <div class="chart-wrap"><canvas id="chart-renewable"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Demand Profile by Hour</h2>
+      <p class="sub">Avg GW by hour-of-day — weekday vs weekend</p>
+      <div class="chart-wrap"><canvas id="chart-demand-profile"></canvas></div>
+    </div>
+  </div>
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Temperature vs Grid Demand</h2>
+      <p class="sub">Scatter — each dot is 1 hour. Expected slope: −600 MW/°C</p>
+      <div class="chart-wrap"><canvas id="chart-scatter"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Grid Stress Timeline</h2>
+      <p class="sub">Cold + calm + dark evenings — when carbon spikes (red bars)</p>
+      <div class="chart-wrap"><canvas id="chart-stress"></canvas></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- end advanced-panel -->
+
+<footer>
+  Data: Elexon BMRS · Open-Meteo · National Grid Carbon Intensity · Octopus Agile · Refreshes every 30 min
+</footer>
+
+</div><!-- end tab-dashboard -->
+
+<!-- SCHEDULE TAB -->
+<div id="tab-schedule" class="tab-panel">
+
+<!-- EXPLAINER STRIP -->
+<div class="explainer">
+  Pick an appliance and we'll find the cheapest, cleanest window to run it — across today and tomorrow.
+  Data refreshes every 30 minutes from live UK grid APIs.
+</div>
+
+<!-- APPLIANCE FINDER -->
+<div class="section">
+  <div class="section-title">When should I run...</div>
+  <div class="card">
+    <p class="sub">Pick an appliance — we'll find the cheapest, cleanest window to run it</p>
+    <div class="a-pills" id="a-pills">
+      <button class="a-pill active" data-hours="4"   data-kw="7"   data-label="EV charge (4h)">EV charge</button>
+      <button class="a-pill"        data-hours="1.5" data-kw="2"   data-label="Washing machine (1.5h)">Washing machine</button>
+      <button class="a-pill"        data-hours="1"   data-kw="1.5" data-label="Dishwasher (1h)">Dishwasher</button>
+      <button class="a-pill"        data-hours="2"   data-kw="3"   data-label="Heat pump (2h)">Heat pump</button>
+      <button class="a-pill"        data-hours="custom" data-kw="1" data-label="Custom">Custom</button>
+    </div>
+    <div class="a-custom-row" id="a-custom-row" style="display:none">
+      Duration: <input type="number" id="a-custom-hours" min="0.5" max="12" step="0.5" value="2"> h &nbsp;
+      Power: <input type="number" id="a-custom-kw" min="0.5" max="20" step="0.5" value="2"> kW
+      <button onclick="runCustomAppliance()">Find windows</button>
+    </div>
+    <div id="a-result"><p class="sub" style="padding:.4rem 0">Loading…</p></div>
+  </div>
+</div>
+
+<!-- BEST WINDOWS -->
+<div class="section" style="padding-bottom:2rem">
+  <div class="section-title-row">
+    <span class="section-title">Best 30-min windows</span>
+    <div class="day-tabs">
+      <button class="day-tab active" id="day-tab-today"    onclick="showDay('today')">Today</button>
+      <button class="day-tab"        id="day-tab-tomorrow" onclick="showDay('tomorrow')">Tomorrow</button>
+    </div>
+  </div>
+  <div id="windows-today"    class="best-windows-grid"></div>
+  <div id="windows-tomorrow" class="best-windows-grid" style="display:none"></div>
+</div>
+
+</div><!-- end tab-schedule -->
+
+<!-- ABOUT TAB -->
+<div id="tab-about" class="tab-panel">
+<div class="info-page">
+
+  <div class="info-note">
+    This dashboard pulls live data from three free UK public APIs every 30 minutes and transforms it through a medallion data pipeline (Bronze → Silver → Gold). The charts below reflect real grid conditions — not forecasts.
+  </div>
+
+  <h2>Generation Fuel Types</h2>
+  <div class="fuel-grid">
+
+    <div class="fuel-card" style="border-left-color:#f97316">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#f97316"></div>
+        <span class="fuel-name">Gas</span>
+        <span class="fuel-tag">Fossil</span>
+      </div>
+      <div class="fuel-desc">The UK's single largest power source. Burns natural gas in a combined cycle (gas turbine + steam turbine), reaching ~58% efficiency. Fires up quickly to meet demand peaks. Labelled CCGT in grid data.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#4ade80">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#4ade80"></div>
+        <span class="fuel-name">Wind</span>
+        <span class="fuel-tag">Renewable</span>
+      </div>
+      <div class="fuel-desc">Combined onshore and offshore wind. The UK has the world's largest offshore wind capacity. Output varies with weather — on a windy day wind can supply over 60% of UK electricity.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#a78bfa">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#a78bfa"></div>
+        <span class="fuel-name">Nuclear</span>
+        <span class="fuel-tag">Low carbon</span>
+      </div>
+      <div class="fuel-desc">Fission-based baseload power. The UK has 5 operational plants (as of 2025). Runs continuously at near-constant output — it doesn't ramp up/down easily. Produces near-zero operational carbon. Hinkley Point C is under construction.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#84cc16">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#84cc16"></div>
+        <span class="fuel-name">Biomass</span>
+        <span class="fuel-tag">Renewable*</span>
+      </div>
+      <div class="fuel-desc">Primarily Drax power station burning compressed wood pellets. Classified as renewable under UK policy (carbon considered re-absorbed by new forest growth), though this is contested. Provides flexible, schedulable generation unlike wind/solar.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#06b6d4">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#06b6d4"></div>
+        <span class="fuel-name">Hydroelectric</span>
+        <span class="fuel-tag">Renewable</span>
+      </div>
+      <div class="fuel-desc">Run-of-river and reservoir hydro generating from natural water flow. Concentrated in Scotland and Wales. Provides clean, reliable baseload with low variability. Distinct from pumped storage, which stores energy rather than generating it.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#22d3ee">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#22d3ee"></div>
+        <span class="fuel-name">Pumped Storage</span>
+        <span class="fuel-tag">Storage</span>
+      </div>
+      <div class="fuel-desc">Water pumped uphill using cheap overnight electricity, then released through turbines during demand peaks — a giant water battery. Dinorwig in Wales ("Electric Mountain") can go from zero to 1.7 GW in 16 seconds.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#fb923c">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#fb923c"></div>
+        <span class="fuel-name">Gas (peaker)</span>
+        <span class="fuel-tag">Fossil / Peaker</span>
+      </div>
+      <div class="fuel-desc">Open-cycle gas turbines — less efficient than standard gas (~35%) but start in minutes. Used only during the highest demand periods. Higher carbon per MWh. You'll see these appear during grid stress events on cold, calm evenings.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#6b7280">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#6b7280"></div>
+        <span class="fuel-name">Coal</span>
+        <span class="fuel-tag">Fossil</span>
+      </div>
+      <div class="fuel-desc">The UK's last coal plant (Ratcliffe-on-Soar) closed in September 2024 — should be at or near zero. Any non-zero reading is likely a small reserve or data artefact. The UK was the birthplace of coal power.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#374151">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#374151"></div>
+        <span class="fuel-name">Oil</span>
+        <span class="fuel-tag">Fossil</span>
+      </div>
+      <div class="fuel-desc">Oil-fired generation. Essentially zero in normal operation — kept for extreme emergencies only. A non-trivial reading here means something unusual is happening on the grid.</div>
+    </div>
+
+    <div class="fuel-card" style="border-left-color:#475569">
+      <div class="fuel-card-head">
+        <div class="fuel-dot" style="background:#475569"></div>
+        <span class="fuel-name">Other</span>
+        <span class="fuel-tag">Mixed</span>
+      </div>
+      <div class="fuel-desc">Catch-all for smaller generation sources not individually categorised: landfill gas, sewage gas, energy-from-waste plants, and some smaller embedded generators not tracked in real time by BMRS.</div>
+    </div>
+
+  </div>
+
+  <h2>Interconnectors</h2>
+  <p style="font-size:.78rem; color:var(--dim); margin-bottom:.9rem; line-height:1.55">The UK is connected to continental Europe and Ireland via high-voltage DC cables under the sea. Positive values = UK importing; negative = UK exporting. They balance the grid across borders — when UK wind is low, France's nuclear output fills the gap.</p>
+  <div class="term-list">
+    <div class="term-row"><div class="term-key">INTELEC / INTEW</div><div class="term-val">England–Wales interconnectors to France (IFA) and other legacy links. IFA has 2 GW capacity.</div></div>
+    <div class="term-row"><div class="term-key">INTFR</div><div class="term-val">IFA2 — second France interconnector (1 GW), opened 2021. Routes via Fareham to Normandy.</div></div>
+    <div class="term-row"><div class="term-key">INTIRL</div><div class="term-val">Moyle interconnector to Northern Ireland (500 MW). Cross-border balancing within the island of Ireland Single Electricity Market.</div></div>
+    <div class="term-row"><div class="term-key">INTGRNL</div><div class="term-val">NEMO Link to Belgium (1 GW, 140 km), operational since 2019. Connects National Grid to Elia.</div></div>
+    <div class="term-row"><div class="term-key">INTNED</div><div class="term-val">BritNed — UK to Netherlands (1 GW). Connects Isle of Grain to Maasvlakte near Rotterdam.</div></div>
+    <div class="term-row"><div class="term-key">INTNEM</div><div class="term-val">North Sea Link — UK to Norway (1.4 GW, 720 km), the world's longest subsea cable. Opened 2021. Trades UK wind for Norwegian hydro.</div></div>
+    <div class="term-row"><div class="term-key">INTIFA2</div><div class="term-val">IFA2 capacity allocation. May appear separately from INTFR in BMRS data depending on settlement period.</div></div>
+    <div class="term-row"><div class="term-key">INTVKL</div><div class="term-val">Viking Link — UK to Denmark (1.4 GW, 765 km), the world's longest land and subsea cable. Opened December 2023.</div></div>
+  </div>
+
+  <h2>Dashboard Metrics Explained</h2>
+  <div class="term-list">
+    <div class="term-row"><div class="term-key">Settlement Period</div><div class="term-val">The UK electricity market operates in 30-minute "settlement periods" (48 per day). All generation, consumption and pricing is settled at this granularity. Period 1 = 00:00–00:30 UTC.</div></div>
+    <div class="term-row"><div class="term-key">Carbon Intensity (gCO₂/kWh)</div><div class="term-val">Grams of CO₂ equivalent emitted per kilowatt-hour of electricity consumed. Includes the full generation mix. Under 100 is very clean; over 300 is dirty (heavy gas use). The UK average has fallen from ~500 in 2012 to under 150 today.</div></div>
+    <div class="term-row"><div class="term-key">Renewable %</div><div class="term-val">Fraction of total generation from wind, hydroelectric, and pumped storage. Nuclear is low-carbon but not renewable. Biomass is renewable under UK policy but excluded here to be conservative.</div></div>
+    <div class="term-row"><div class="term-key">7-Day Rolling Average</div><div class="term-val">The average renewable % computed over the previous 168 hours (7 × 24). Smooths out daily and weather-driven variation so you can see the underlying trend.</div></div>
+    <div class="term-row"><div class="term-key">Grid Stress Hour</div><div class="term-val">An hour flagged as high-risk for carbon spikes: temperature below 7°C AND windspeed below 20 km/h AND time between 16:00–20:00 AND renewable % below 30%. These are the conditions when gas peakers fire and carbon intensity surges. Typically December–February.</div></div>
+    <div class="term-row"><div class="term-key">Temp vs Demand slope</div><div class="term-val">The regression coefficient from the scatter chart. A typical value is −500 to −800 MW/°C on weekdays — meaning each 1°C drop in temperature adds roughly half a gigawatt to national demand, mainly from heating.</div></div>
+    <div class="term-row"><div class="term-key">Demand Profile</div><div class="term-val">Average grid demand by hour of day, split weekday vs weekend. The weekday "morning ramp" (~06:00–09:00) and "evening peak" (~17:00–19:00) are driven by commuting patterns. Weekend profiles are flatter and shifted later.</div></div>
+    <div class="term-row"><div class="term-key">Carbon Heatmap</div><div class="term-val">Best hours to run high-electricity appliances (EV charging, washing machine, dishwasher). Green cells = high renewable share, low carbon. Weekend mornings are typically cleanest; winter weekday evenings are dirtiest.</div></div>
+    <div class="term-row"><div class="term-key">BMRS</div><div class="term-val">Balancing Mechanism Reporting Service — operated by Elexon on behalf of National Grid. The official source of UK half-hourly generation data. All licensed generators above 50 MW must report here.</div></div>
+  </div>
+
+  <h2>Data Pipeline</h2>
+  <div class="info-note" style="margin-top:.5rem">
+    Raw API responses land in <strong>Bronze</strong> tables with no transformation. DBT cleans and types the data into <strong>Silver</strong> staging models (UTC timestamps, deduplication, region lookups). <strong>Gold</strong> mart tables join the three sources and compute aggregates — these are what the charts query directly. The pipeline runs every 30 minutes via cron.
+  </div>
+
+</div>
+</div><!-- end tab-about -->
+
+<script>
+// ── Colours ───────────────────────────────────────────────────────
+const FUEL_COLORS = {
+  WIND:    '#4ade80', NUCLEAR: '#a78bfa', CCGT:    '#f97316',
+  BIOMASS: '#84cc16', NPSHYD:  '#06b6d4', PS:      '#22d3ee',
+  COAL:    '#6b7280', OCGT:    '#fb923c', OIL:     '#374151',
+  OTHER:   '#475569', INTELEC: '#818cf8', INTFR:   '#c084fc',
+  INTEW:   '#67e8f9', INTIRL:  '#86efac', INTGRNL: '#fde68a',
+  INTIFA2: '#fca5a5', INTNED:  '#d8b4fe', INTNEM:  '#a5f3fc',
+  INTVKL:  '#bbf7d0', INTNSL:  '#99f6e4',
+};
+const FUEL_LABELS = {
+  CCGT: 'Gas', OCGT: 'Gas (peaker)', COAL: 'Coal', OIL: 'Oil',
+  WIND: 'Wind', NPSHYD: 'Hydroelectric', BIOMASS: 'Biomass',
+  NUCLEAR: 'Nuclear', PS: 'Pumped Storage', OTHER: 'Other',
+  INTELEC: 'France', INTFR: 'France (IFA2)', INTEW: 'France (legacy)',
+  INTIRL: 'Ireland', INTGRNL: 'Ireland (Greenlink)',
+  INTIFA2: 'France', INTNED: 'Netherlands', INTNEM: 'Norway',
+  INTVKL: 'Denmark', INTNSL: 'Norway (NSL)',
+};
+const INTERCONN = ['INTELEC','INTFR','INTEW','INTIRL','INTGRNL','INTIFA2','INTNED','INTNEM','INTVKL','INTNSL'];
+
+Chart.defaults.color = '#475569';
+Chart.defaults.borderColor = '#e2e8f0';
+Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+let currentNow = {};
+
+function noData(canvasId) {
+  const el = document.getElementById(canvasId);
+  el.parentElement.innerHTML = '<p class="no-data">Accumulating data — check back after a few ingest cycles</p>';
+}
+
+// ── Hero signal ──────────────────────────────────────────────────
+async function loadHero() {
+  try {
+    const d = await fetch('/api/now').then(r => r.json());
+    if (!d || !d.period_utc) return;
+
+    let level, word, scoreVal, rec;
+
+    if (d.window_score != null) {
+      scoreVal = d.window_score;
+      rec = d.recommendation || '';
+      if      (scoreVal >= 75) { level = 'excellent'; word = 'Excellent'; }
+      else if (scoreVal >= 55) { level = 'good';      word = 'Good'; }
+      else if (scoreVal >= 35) { level = 'fair';      word = 'Fair'; }
+      else                     { level = 'poor';      word = 'Poor'; }
+    } else {
+      const idx = (d.intensity_index || '').toLowerCase();
+      if      (idx.includes('very low'))  { level = 'excellent'; word = 'Excellent'; scoreVal = 85; }
+      else if (idx.includes('low'))       { level = 'good';      word = 'Good';      scoreVal = 65; }
+      else if (idx.includes('moderate'))  { level = 'fair';      word = 'Fair';      scoreVal = 45; }
+      else                                { level = 'poor';      word = 'Poor';      scoreVal = 20; }
+      const phrases = {
+        excellent: 'Grid is clean & cheap — run anything',
+        good:      'Good conditions — good time to charge or wash',
+        fair:      'Mixed conditions — non-urgent tasks can wait',
+        poor:      'Grid is busy & dirty — delay if you can',
+      };
+      rec = phrases[level];
+    }
+
+    currentNow = d;
+    document.getElementById('hero-section').className = 'hero ' + level;
+    document.getElementById('hero-word').textContent  = word;
+    document.getElementById('hero-bar').style.width   = scoreVal + '%';
+    document.getElementById('hero-score').textContent = `Score ${scoreVal}/100`;
+    document.getElementById('hero-rec').textContent   = rec;
+    document.getElementById('hero-price').textContent  = d.price_p_kwh  != null ? d.price_p_kwh + 'p' : '—';
+    document.getElementById('hero-carbon').textContent = d.carbon_gco2_kwh ?? '—';
+    document.getElementById('hero-renew').textContent  = d.renewable_pct != null ? d.renewable_pct + '%' : '—';
+
+    if (d.next_period_utc) {
+      document.getElementById('hero-next-time').textContent = d.next_period_utc.slice(11, 16);
+      document.getElementById('hero-next-sub').textContent  =
+        `Score ${d.next_score}/100 · ${d.next_price}p · ${d.next_carbon} gCO₂`;
+    } else {
+      document.getElementById('hero-next-wrap').style.display = 'none';
+    }
+  } catch(e) { console.error('hero', e); }
+}
+
+// ── KPI ──────────────────────────────────────────────────────────
+async function loadKPI() {
+  try {
+    const d = await fetch('/api/kpi').then(r => r.json());
+    document.getElementById('kv-hour').textContent    = d.cleanest_hour ? d.cleanest_hour.slice(11,16) : '—';
+    document.getElementById('kv-pct').textContent     = d.renewable_pct != null ? d.renewable_pct + '%' : '—';
+    document.getElementById('kv-7d').textContent      = d.avg_7d != null ? d.avg_7d + '%' : '—';
+    document.getElementById('kv-demand').textContent  = d.avg_demand_gw != null ? d.avg_demand_gw + ' GW' : '—';
+    document.getElementById('kv-peak').textContent    = d.peak_demand_gw ?? '—';
+    document.getElementById('kv-carbon').textContent  = d.avg_carbon != null ? d.avg_carbon + '' : '—';
+    document.getElementById('kv-stress').textContent  = d.stress_hours ?? '0';
+    document.getElementById('kv-price').textContent   = d.current_price_p_kwh != null ? d.current_price_p_kwh + 'p' : '—';
+    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) { console.error('kpi', e); }
+}
+
+// ── Fuel mix stacked area ─────────────────────────────────────────
+async function loadFuelMix() {
+  const ctx = document.getElementById('chart-fuel-mix').getContext('2d');
+  try {
+    const { labels, fuels } = await fetch('/api/fuel-mix').then(r => r.json());
+    if (!labels.length) { noData('chart-fuel-mix'); return; }
+
+    // Order: renewables first, then low-carbon, then fossil
+    const ORDER = ['WIND','NPSHYD','PS','BIOMASS','NUCLEAR','INTELEC','INTFR','INTEW','INTIRL',
+                   'INTGRNL','INTIFA2','INTNED','INTNEM','INTVKL','OTHER','OCGT','CCGT','OIL','COAL'];
+    const orderedFuels = [...ORDER.filter(f => fuels[f]), ...Object.keys(fuels).filter(f => !ORDER.includes(f))];
+
+    const datasets = orderedFuels.map(ft => ({
+      label: FUEL_LABELS[ft] || ft,
+      data: fuels[ft],
+      backgroundColor: (FUEL_COLORS[ft] || '#94a3b8') + 'cc',
+      borderColor: FUEL_COLORS[ft] || '#94a3b8',
+      borderWidth: 0.5,
+      fill: true,
+      pointRadius: 0,
+    }));
+
+    // Legend
+    const legend = document.getElementById('fuel-legend');
+    orderedFuels.forEach(ft => {
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `<div class="swatch" style="background:${FUEL_COLORS[ft]||'#94a3b8'}"></div>${FUEL_LABELS[ft]||ft}`;
+      legend.appendChild(item);
+    });
+
+    new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: c => `${c.dataset.label}: ${Math.round(c.raw).toLocaleString()} MW`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 10, maxRotation: 0 }, stacked: true },
+          y: { stacked: true, title: { display: true, text: 'MW' },
+               ticks: { callback: v => (v/1000).toFixed(0) + 'k' } }
+        }
+      }
+    });
+  } catch(e) { console.error('fuel-mix', e); noData('chart-fuel-mix'); }
+}
+
+// ── Donut + grid snapshot panels (current hour) ──────────────────
+async function loadDonut() {
+  const ctx = document.getElementById('chart-donut').getContext('2d');
+  try {
+    const { labels, fuels } = await fetch('/api/fuel-mix').then(r => r.json());
+    if (!labels.length) { noData('chart-donut'); return; }
+
+    const RENEWABLES = ['WIND','NPSHYD','PS','BIOMASS'];
+    const LOW_CARBON = ['NUCLEAR'];
+    const FOSSIL     = ['CCGT','OCGT','COAL','OIL'];
+    const STORAGE    = ['PS'];
+    const ORDER      = [...RENEWABLES, ...LOW_CARBON, ...FOSSIL, ...INTERCONN, 'OTHER'];
+
+    const lastIdx = labels.length - 1;
+    const raw = Object.entries(fuels)
+      .map(([ft, vals]) => ({ ft, mw: vals[lastIdx] || 0 }))
+      .filter(e => e.mw !== 0);
+
+    // Collapse interconnectors for donut only
+    const interconnEntries = raw.filter(e => INTERCONN.includes(e.ft));
+    const interconnMW = interconnEntries.reduce((s, e) => s + e.mw, 0);
+    const donutEntries = [
+      ...raw.filter(e => !INTERCONN.includes(e.ft)).filter(e => e.mw > 0),
+      ...(interconnMW > 0 ? [{ ft: 'Interconnectors', mw: interconnMW }] : []),
+    ].sort((a, b) => {
+      const O = [...RENEWABLES, ...LOW_CARBON, ...FOSSIL, 'Interconnectors', 'OTHER'];
+      return (O.indexOf(a.ft) + 1 || 999) - (O.indexOf(b.ft) + 1 || 999);
+    });
+
+    const totalMW  = donutEntries.filter(e => e.mw > 0).reduce((s, e) => s + e.mw, 0);
+    const renewMW  = raw.filter(e => RENEWABLES.includes(e.ft)).reduce((s, e) => s + Math.max(e.mw, 0), 0);
+    const totalGW  = (totalMW / 1000).toFixed(1);
+    const renewPct = totalMW > 0 ? (renewMW / totalMW * 100).toFixed(1) : '—';
+
+    const centerPlugin = {
+      id: 'donutCenter',
+      afterDraw(chart) {
+        const { ctx: c, chartArea: { top, bottom, left, right } } = chart;
+        const cx = (left + right) / 2, cy = (top + bottom) / 2;
+        c.save();
+        c.textAlign = 'center';
+        c.font = '500 10px -apple-system,sans-serif';
+        c.fillStyle = '#94a3b8';
+        c.fillText('GENERATION', cx, cy - 20);
+        c.font = 'bold 22px -apple-system,sans-serif';
+        c.fillStyle = '#0f172a';
+        c.fillText(totalGW + ' GW', cx, cy + 4);
+        c.font = '500 12px -apple-system,sans-serif';
+        c.fillStyle = '#16a34a';
+        c.fillText(renewPct + '% renewable', cx, cy + 22);
+        c.restore();
+      }
+    };
+
+    new Chart(ctx, {
+      type: 'doughnut',
+      plugins: [centerPlugin],
+      data: {
+        labels: donutEntries.map(e => FUEL_LABELS[e.ft] || e.ft),
+        datasets: [{
+          data:            donutEntries.map(e => e.mw),
+          backgroundColor: donutEntries.map(e => e.ft === 'Interconnectors' ? '#818cf8' : (FUEL_COLORS[e.ft] || '#94a3b8')),
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverOffset: 10,
+          hoverBorderWidth: 0,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        cutout: '56%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              boxWidth: 10, font: { size: 10 }, padding: 8,
+              generateLabels: chart => chart.data.labels.map((label, i) => ({
+                text: `${label}  ${(donutEntries[i].mw / 1000).toFixed(1)} GW`,
+                fillStyle: chart.data.datasets[0].backgroundColor[i],
+                strokeStyle: '#fff',
+                lineWidth: 0,
+                hidden: false, index: i,
+              }))
+            }
+          },
+          tooltip: {
+            callbacks: {
+              title: items => items[0].label,
+              label: c => {
+                const mw  = Math.round(donutEntries[c.dataIndex].mw);
+                const pct = (Math.max(mw,0) / totalMW * 100).toFixed(1);
+                const ft  = donutEntries[c.dataIndex].ft;
+                const cat = RENEWABLES.includes(ft)   ? 'Renewable'
+                          : LOW_CARBON.includes(ft)   ? 'Low carbon'
+                          : FOSSIL.includes(ft)        ? 'Fossil fuel'
+                          : ft === 'Interconnectors'   ? 'Interconnector'
+                          : 'Other';
+                return [`${Math.abs(mw).toLocaleString()} MW · ${pct}% of grid`, cat];
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // ── Render grouped breakdown panels ──────────────────────────
+    function fuelRow(ft, mw) {
+      const gw  = (Math.abs(mw) / 1000).toFixed(2);
+      const pct = totalMW > 0 ? (Math.abs(mw) / totalMW * 100).toFixed(1) : '0';
+      const neg = mw < 0;
+      const col = FUEL_COLORS[ft] || '#94a3b8';
+      const lbl = FUEL_LABELS[ft] || ft;
+      return `<div class="fuel-row${neg ? ' negative' : ''}">
+        <div class="fuel-row-swatch" style="background:${col}"></div>
+        <div class="fuel-row-name">${lbl}</div>
+        <div class="fuel-row-gw">${neg ? '−' : ''}${gw}GW</div>
+        <div class="fuel-row-pct">${pct}%</div>
+      </div>`;
+    }
+
+    function groupMW(fts) {
+      return raw.filter(e => fts.includes(e.ft)).reduce((s, e) => s + Math.max(e.mw, 0), 0);
+    }
+
+    function groupPct(mw) {
+      return totalMW > 0 ? (mw / totalMW * 100).toFixed(1) : '0';
+    }
+
+    function buildGroup(headClass, title, pct, fts) {
+      const rows = raw.filter(e => fts.includes(e.ft) && e.mw !== 0)
+        .sort((a, b) => Math.abs(b.mw) - Math.abs(a.mw));
+      if (!rows.length) return '';
+      return `<div class="fuel-group">
+        <div class="fuel-group-head ${headClass}">
+          <span>${title}</span>
+          <span class="fuel-group-head-note">${pct}% of grid</span>
+        </div>
+        ${rows.map(e => fuelRow(e.ft, e.mw)).join('')}
+      </div>`;
+    }
+
+    const fossilMW = groupMW(FOSSIL);
+    const renewMW2 = groupMW(RENEWABLES.filter(f => f !== 'PS'));
+    const otherMW  = groupMW([...LOW_CARBON, 'OTHER']);
+    const storageMW = groupMW(['PS']);
+
+    document.getElementById('snapshot-groups').innerHTML =
+      buildGroup('fossil',    'Fossil fuels', groupPct(fossilMW), FOSSIL) +
+      buildGroup('renewable', 'Renewables',   groupPct(renewMW2), RENEWABLES.filter(f => f !== 'PS')) +
+      buildGroup('other',     'Other sources', groupPct(otherMW), [...LOW_CARBON, 'OTHER']);
+
+    // Side: interconnectors + storage
+    const interconnRows = raw.filter(e => INTERCONN.includes(e.ft) && e.mw !== 0)
+      .sort((a, b) => Math.abs(b.mw) - Math.abs(a.mw));
+    const interconnGW = interconnRows.reduce((s, e) => s + e.mw, 0);
+    const interconnHtml = interconnRows.length
+      ? `<div class="fuel-group">
+          <div class="fuel-group-head interconn">
+            <span>Interconnectors</span>
+            <span class="fuel-group-head-note">${groupPct(Math.abs(interconnGW))}% of grid</span>
+          </div>
+          ${interconnRows.map(e => fuelRow(e.ft, e.mw)).join('')}
+        </div>` : '';
+
+    const storageHtml = buildGroup('storage', 'Storage', groupPct(storageMW), ['PS']);
+
+    document.getElementById('snapshot-side').innerHTML = interconnHtml + storageHtml;
+
+  } catch(e) { console.error('donut', e); noData('chart-donut'); }
+}
+
+// ── Interconnectors time series ───────────────────────────────────
+const INTERCONN_COLORS = {
+  INTELEC:'#818cf8', INTFR:'#c084fc', INTEW:'#67e8f9',
+  INTIRL:'#86efac',  INTGRNL:'#fde68a', INTIFA2:'#fca5a5',
+  INTNED:'#d8b4fe',  INTNEM:'#a5f3fc',  INTVKL:'#bbf7d0',
+};
+
+async function loadInterconn() {
+  const ctx = document.getElementById('chart-interconn').getContext('2d');
+  try {
+    const { labels, links } = await fetch('/api/interconnectors').then(r => r.json());
+    if (!labels.length) { noData('chart-interconn'); return; }
+
+    const datasets = Object.entries(links).map(([ft, vals]) => ({
+      label: ft.replace('INT',''),
+      data: vals,
+      borderColor: INTERCONN_COLORS[ft] || '#94a3b8',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      spanGaps: true,
+    }));
+
+    new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } },
+          tooltip: {
+            callbacks: {
+              label: c => {
+                if (c.raw == null) return null;
+                const dir = c.raw >= 0 ? '↓ import' : '↑ export';
+                return `${c.dataset.label}: ${Math.abs(c.raw).toLocaleString()} MW ${dir}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+          y: {
+            title: { display: true, text: 'MW  (+ import  /  − export)' },
+            grid: {
+              color: ctx => ctx.tick.value === 0 ? '#64748b' : '#e2e8f0',
+              lineWidth: ctx => ctx.tick.value === 0 ? 1.5 : 0.5,
+            }
+          }
+        }
+      }
+    });
+  } catch(e) { console.error('interconn', e); }
+}
+
+// ── Renewable % + windspeed + temp ───────────────────────────────
+async function loadRenewable() {
+  const ctx = document.getElementById('chart-renewable').getContext('2d');
+  try {
+    const data = await fetch('/api/renewable-mix').then(r => r.json());
+    if (!data.length) { noData('chart-renewable'); return; }
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map(d => d.hour_utc.slice(0,13)),
+        datasets: [
+          { label: 'Renewable %', data: data.map(d => d.renewable_pct),
+            borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.07)',
+            borderWidth: 1.5, pointRadius: 0, fill: true, yAxisID: 'yPct' },
+          { label: '7-day avg', data: data.map(d => d.renewable_pct_7d_avg),
+            borderColor: '#fbbf24', borderDash: [4,4],
+            borderWidth: 2, pointRadius: 0, yAxisID: 'yPct' },
+          { label: 'Wind speed (km/h)', data: data.map(d => d.windspeed_kmh),
+            borderColor: '#818cf8', borderWidth: 1.5,
+            pointRadius: 0, yAxisID: 'yWind' },
+          { label: 'Temp (°C)', data: data.map(d => d.temp_c),
+            borderColor: '#f97316', borderWidth: 1.5, borderDash: [2,3],
+            pointRadius: 0, yAxisID: 'yTemp' },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x:     { ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+          yPct:  { position: 'left',  title: { display: true, text: '%' }, min: 0, max: 100 },
+          yWind: { position: 'right', title: { display: true, text: 'km/h' },
+                   grid: { drawOnChartArea: false }, min: 0 },
+          yTemp: { display: false },
+        }
+      }
+    });
+  } catch(e) { console.error('renewable', e); noData('chart-renewable'); }
+}
+
+// ── Demand profile ───────────────────────────────────────────────
+async function loadDemandProfile() {
+  const ctx = document.getElementById('chart-demand-profile').getContext('2d');
+  try {
+    const data = await fetch('/api/demand-profile').then(r => r.json());
+    if (!data.length) { noData('chart-demand-profile'); return; }
+    const weekday = Array(24).fill(null), weekend = Array(24).fill(null);
+    const wdMin = Array(24).fill(null), wdMax = Array(24).fill(null);
+    const weMin = Array(24).fill(null), weMax = Array(24).fill(null);
+    data.forEach(r => {
+      if (r.day_type === 'weekday') { weekday[r.hour_of_day] = r.avg_gw; wdMin[r.hour_of_day] = r.min_gw; wdMax[r.hour_of_day] = r.max_gw; }
+      if (r.day_type === 'weekend') { weekend[r.hour_of_day] = r.avg_gw; weMin[r.hour_of_day] = r.min_gw; weMax[r.hour_of_day] = r.max_gw; }
+    });
+    const hours = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: hours,
+        datasets: [
+          { label: 'Weekday', data: weekday, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.08)',
+            borderWidth: 2, pointRadius: 3, fill: true },
+          { label: 'Weekend', data: weekend, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,0.08)',
+            borderWidth: 2, pointRadius: 3, fill: true },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { ticks: { maxRotation: 0 } },
+          y: { title: { display: true, text: 'GW' } }
+        }
+      }
+    });
+  } catch(e) { console.error('demand-profile', e); noData('chart-demand-profile'); }
+}
+
+// ── Scatter ──────────────────────────────────────────────────────
+async function loadScatter() {
+  const ctx = document.getElementById('chart-scatter').getContext('2d');
+  try {
+    const data = await fetch('/api/temp-vs-demand').then(r => r.json());
+    if (!data.length) { noData('chart-scatter'); return; }
+    const weekday = data.filter(d => d.day_type === 'weekday').map(d => ({x: d.temp_c, y: +(d.total_demand_mw/1000).toFixed(1)}));
+    const weekend = data.filter(d => d.day_type === 'weekend').map(d => ({x: d.temp_c, y: +(d.total_demand_mw/1000).toFixed(1)}));
+    new Chart(ctx, {
+      type: 'scatter',
+      data: { datasets: [
+        { label: 'Weekday', data: weekday, backgroundColor: 'rgba(56,189,248,0.45)', pointRadius: 3 },
+        { label: 'Weekend', data: weekend, backgroundColor: 'rgba(251,146,60,0.45)',  pointRadius: 3 },
+      ]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { title: { display: true, text: 'Temperature (°C)' } },
+          y: { title: { display: true, text: 'Total Demand (GW)' } }
+        }
+      }
+    });
+  } catch(e) { console.error('scatter', e); noData('chart-scatter'); }
+}
+
+// ── Grid stress ──────────────────────────────────────────────────
+async function loadStress() {
+  const ctx = document.getElementById('chart-stress').getContext('2d');
+  try {
+    const data = await fetch('/api/grid-stress').then(r => r.json());
+    if (!data.length) { noData('chart-stress'); return; }
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.hour_utc.slice(5,13)),
+        datasets: [
+          { label: 'Renewable %', data: data.map(d => d.renewable_pct),
+            backgroundColor: data.map(d => d.is_stress_hour ? 'rgba(248,113,113,0.8)' : 'rgba(74,222,128,0.4)'),
+            borderWidth: 0, yAxisID: 'y' },
+          { label: 'Temp °C', data: data.map(d => d.temp_c),
+            type: 'line', borderColor: '#38bdf8', borderWidth: 1.5,
+            pointRadius: 0, yAxisID: 'y2' },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              afterBody: items => {
+                const i = items[0].dataIndex;
+                return data[i].is_stress_hour ? ['⚠ STRESS HOUR — gas peakers likely firing'] : [];
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12, maxRotation: 45, font: { size: 9 } } },
+          y:  { title: { display: true, text: 'Renewable %' }, position: 'left',  min: 0, max: 100 },
+          y2: { title: { display: true, text: '°C' },          position: 'right', grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+  } catch(e) { console.error('stress', e); noData('chart-stress'); }
+}
+
+// ── Carbon heatmap ───────────────────────────────────────────────
+async function loadHeatmap() {
+  const ctx = document.getElementById('chart-heatmap').getContext('2d');
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const HOURS = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+  try {
+    const data = await fetch('/api/carbon-heatmap').then(r => r.json());
+    if (!data.length) { noData('chart-heatmap'); return; }
+    const vals = data.map(d => d.avg_intensity_gco2kwh);
+    const minV = Math.min(...vals), maxV = Math.max(...vals);
+    function col(v) {
+      const t = (v - minV) / (maxV - minV);
+      return `rgb(${Math.round(34+t*205)},${Math.round(197-t*129)},${Math.round(94-t*26)})`;
+    }
+    const datasets = DAYS.map((day, di) => {
+      const rows = data.filter(d => d.day_of_week === di);
+      return {
+        label: day,
+        data: HOURS.map((_,hi) => { const r = rows.find(d => d.hour_of_day===hi); return r ? r.avg_intensity_gco2kwh : null; }),
+        backgroundColor: HOURS.map((_,hi) => { const r = rows.find(d => d.hour_of_day===hi); return r ? col(r.avg_intensity_gco2kwh) : 'transparent'; }),
+        barPercentage: 1.0, categoryPercentage: 1.0,
+      };
+    });
+    new Chart(ctx, {
+      type: 'bar',
+      data: { labels: HOURS, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label} ${c.label}: ${c.raw} gCO₂/kWh` } }
+        },
+        scales: {
+          x: { ticks: { maxRotation: 90, font: { size: 8 } } },
+          y: { title: { display: true, text: 'gCO₂/kWh' } }
+        }
+      }
+    });
+  } catch(e) { console.error('heatmap', e); noData('chart-heatmap'); }
+}
+
+// ── Regional leaderboard ─────────────────────────────────────────
+
+// ── Windows by day (today / tomorrow) ───────────────────────────
+let windowsByDayData = {};
+
+function windowCardHTML(w, rank) {
+  const cls = w.score >= 75 ? 'excellent' : w.score >= 55 ? 'good' : w.score >= 35 ? 'fair' : 'poor';
+  const time = w.period_utc ? w.period_utc.slice(11,16) : '—';
+  return `
+    <div class="window-card ${cls}">
+      <div class="window-rank">#${rank} best window</div>
+      <div class="window-time">${time}</div>
+      <div class="window-score">Score ${w.score}/100 · ${w.intensity_index || ''}</div>
+      <div class="window-stats">
+        <div class="window-stat" style="color:#fbbf24">
+          <strong>${w.price_p_kwh ?? '—'}p</strong><span class="lbl">per kWh</span>
+        </div>
+        <div class="window-stat" style="color:#a78bfa">
+          <strong>${w.carbon_gco2_kwh ?? '—'}</strong><span class="lbl">gCO₂/kWh</span>
+        </div>
+        ${w.renewable_pct != null ? `<div class="window-stat" style="color:#4ade80"><strong>${w.renewable_pct}%</strong><span class="lbl">renewable</span></div>` : ''}
+      </div>
+      <div class="window-rec">${w.recommendation || ''}</div>
+    </div>`;
+}
+
+async function loadWindowsByDay() {
+  try {
+    windowsByDayData = await fetch('/api/windows-by-day').then(r => r.json());
+    const days = Object.keys(windowsByDayData).sort();
+    if (!days.length) return;
+
+    const todayKey    = days[0];
+    const tomorrowKey = days[1];
+
+    const todayEl = document.getElementById('windows-today');
+    todayEl.innerHTML = (windowsByDayData[todayKey] || [])
+      .map((w, i) => windowCardHTML(w, i + 1)).join('');
+
+    if (tomorrowKey && windowsByDayData[tomorrowKey]?.length) {
+      const tmEl = document.getElementById('windows-tomorrow');
+      tmEl.innerHTML = windowsByDayData[tomorrowKey]
+        .map((w, i) => windowCardHTML(w, i + 1)).join('');
+      document.getElementById('day-tab-tomorrow').style.display = '';
+    } else {
+      document.getElementById('day-tab-tomorrow').style.display = 'none';
+    }
+
+    const todayBest    = (windowsByDayData[todayKey]    || [])[0]?.score || 0;
+    const tomorrowBest = tomorrowKey ? (windowsByDayData[tomorrowKey] || [])[0]?.score || 0 : 0;
+    if (todayBest < 55 && tomorrowBest > todayBest) {
+      showDay('tomorrow');
+    }
+  } catch(e) { console.error('windows-by-day', e); }
+}
+
+function showDay(day) {
+  const isToday = day === 'today';
+  document.getElementById('windows-today').style.display    = isToday ? '' : 'none';
+  document.getElementById('windows-tomorrow').style.display = isToday ? 'none' : '';
+  document.getElementById('day-tab-today').classList.toggle('active',    isToday);
+  document.getElementById('day-tab-tomorrow').classList.toggle('active', !isToday);
+}
+
+// ── Appliance finder ─────────────────────────────────────────────
+let activeAppliance = { hours: 4, kw: 7, label: 'EV charge (4h)' };
+
+document.getElementById('a-pills').addEventListener('click', e => {
+  const pill = e.target.closest('.a-pill');
+  if (!pill) return;
+  document.querySelectorAll('.a-pill').forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
+
+  if (pill.dataset.hours === 'custom') {
+    document.getElementById('a-custom-row').style.display = 'flex';
+    return;
+  }
+  document.getElementById('a-custom-row').style.display = 'none';
+  activeAppliance = {
+    hours: parseFloat(pill.dataset.hours),
+    kw:    parseFloat(pill.dataset.kw),
+    label: pill.dataset.label,
+  };
+  fetchApplianceWindows(activeAppliance.hours, activeAppliance.kw, activeAppliance.label);
+});
+
+function runCustomAppliance() {
+  const hours = parseFloat(document.getElementById('a-custom-hours').value) || 2;
+  const kw    = parseFloat(document.getElementById('a-custom-kw').value)    || 2;
+  activeAppliance = { hours, kw, label: `Custom (${hours}h, ${kw}kW)` };
+  fetchApplianceWindows(hours, kw, activeAppliance.label);
+}
+
+async function fetchApplianceWindows(hours, kw, label) {
+  const container = document.getElementById('a-result');
+  container.innerHTML = '<p class="sub" style="padding:.4rem 0">Finding best windows…</p>';
+  try {
+    const windows = await fetch(`/api/appliance-windows?hours=${hours}`).then(r => r.json());
+    if (!windows.length) {
+      container.innerHTML = '<p class="no-data">Not enough price data yet — check back after next ingest.</p>';
+      return;
+    }
+    const best    = windows[0];
+    const alts    = windows.slice(1, 4);
+    const nowP    = currentNow.price_p_kwh;
+    const nowC    = currentNow.carbon_gco2_kwh;
+    const energy  = kw * hours;
+
+    let savingsHTML = '';
+    if (nowP != null && best.avg_price != null) {
+      const savingP  = ((nowP - best.avg_price) * energy).toFixed(0);
+      const savingC  = nowC != null ? (((nowC - best.avg_carbon) / 1000) * energy).toFixed(2) : null;
+      if (parseFloat(savingP) > 0) {
+        savingsHTML = `<div class="a-savings">
+          vs using electricity <em>right now</em>: save <strong>${savingP}p</strong>
+          ${savingC && parseFloat(savingC) > 0 ? `and <strong>${savingC} kg CO₂</strong>` : ''}
+        </div>`;
+      }
+    }
+
+    const fmt = t => t ? t.slice(11,16) : '—';
+    const bestCls = best.score >= 75 ? '#22c55e' : best.score >= 55 ? '#38bdf8' : best.score >= 35 ? '#fbbf24' : '#f87171';
+
+    container.innerHTML = `
+      <div class="a-result-grid">
+        <div class="a-best" style="border-top-color:${bestCls}">
+          <div class="a-best-rank">Best window · ${label}</div>
+          <div class="a-best-time">${fmt(best.start)} – ${fmt(best.end)}</div>
+          <div class="a-best-score">Score ${best.score}/100</div>
+          <div class="a-best-stats">
+            <span>${best.avg_price}p avg</span>
+            <span>${best.avg_carbon ?? '—'} gCO₂</span>
+            ${best.avg_renewable != null ? `<span>${best.avg_renewable}% renewable</span>` : ''}
+          </div>
+          ${savingsHTML}
+        </div>
+        <div class="a-alts">
+          ${alts.map((w, i) => `
+            <div class="a-alt">
+              <span class="a-alt-rank">#${i + 2}</span>
+              <span class="a-alt-time">${fmt(w.start)} – ${fmt(w.end)}</span>
+              <span class="a-alt-stats">${w.avg_price}p · ${w.avg_carbon ?? '—'} gCO₂</span>
+              <span class="a-alt-score">Score ${w.score}</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  } catch(e) { console.error('appliance', e); container.innerHTML = '<p class="no-data">Error loading windows.</p>'; }
+}
+
+async function loadApplianceFinder() {
+  await fetchApplianceWindows(activeAppliance.hours, activeAppliance.kw, activeAppliance.label);
+}
+
+// ── Advanced panel toggle ────────────────────────────────────────
+function toggleAdvanced() {
+  const panel = document.getElementById('advanced-panel');
+  const btn   = document.getElementById('advanced-toggle-btn');
+  const open  = panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  btn.textContent = open ? 'Hide advanced charts ↑' : 'Show advanced charts ↓';
+}
+
+// ── Tab switching ────────────────────────────────────────────────
+let scheduleLoaded = false;
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'schedule' && !scheduleLoaded) {
+    scheduleLoaded = true;
+    loadWindowsByDay();
+    loadApplianceFinder();
+  }
+}
+
+// ── Boot ─────────────────────────────────────────────────────────
+// ── Best windows ─────────────────────────────────────────────────
+async function loadBestWindows() {
+  const panel = document.getElementById('best-windows-panel');
+  try {
+    const data = await fetch('/api/best-windows').then(r => r.json());
+    if (!data.length) { panel.innerHTML = '<p class="no-data">Prices not yet available — runs after next ingest</p>'; return; }
+    const cls = r => r.recommendation.toLowerCase().startsWith('excel') ? 'excellent'
+                   : r.recommendation.toLowerCase().startsWith('good')  ? 'good'
+                   : r.recommendation.toLowerCase().startsWith('fair')  ? 'fair' : 'poor';
+    panel.innerHTML = data.map(r => `
+      <div class="window-card ${cls(r)}">
+        <div class="window-rank">#${r.rank} best window</div>
+        <div class="window-time">${r.period_utc.slice(11,16)}</div>
+        <div class="window-score">Score ${r.window_score}/100 · ${r.intensity_index||''}</div>
+        <div class="window-stats">
+          <div class="window-stat" style="color:#fbbf24">
+            <strong>${r.price_p_kwh ?? '—'}p</strong>
+            <span class="lbl">per kWh</span>
+          </div>
+          <div class="window-stat" style="color:#4ade80">
+            <strong>${r.carbon_gco2_kwh ?? '—'}</strong>
+            <span class="lbl">gCO₂/kWh</span>
+          </div>
+          <div class="window-stat" style="color:#38bdf8">
+            <strong>${r.renewable_pct ?? '—'}%</strong>
+            <span class="lbl">renewable</span>
+          </div>
+        </div>
+        <div class="window-rec">${r.recommendation}</div>
+      </div>`).join('');
+  } catch(e) { console.error('best-windows', e); }
+}
+
+// ── Price + carbon combined chart ─────────────────────────────────
+async function loadPriceCarbon() {
+  const ctx = document.getElementById('chart-price-carbon').getContext('2d');
+  try {
+    const data = await fetch('/api/prices-carbon').then(r => r.json());
+    if (!data.length) { noData('chart-price-carbon'); return; }
+    const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const labels = data.map(d => {
+      const s = d.period_utc || '';
+      const dt = new Date(s.slice(0,10) + 'T00:00:00Z');
+      const day = isNaN(dt) ? '' : DAYS_SHORT[dt.getUTCDay()] + ' ';
+      return day + s.slice(11,16);
+    });
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Price (p/kWh)', data: data.map(d => d.price_p_kwh),
+            borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.07)',
+            borderWidth: 1.5, pointRadius: 0, fill: true, yAxisID: 'yPrice' },
+          { label: 'Carbon (gCO₂/kWh)', data: data.map(d => d.carbon_intensity),
+            borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.07)',
+            borderWidth: 1.5, pointRadius: 0, fill: true, yAxisID: 'yCarbon' },
+          { label: 'Renewable %', data: data.map(d => d.renewable_pct),
+            borderColor: '#4ade80', borderDash: [3,3],
+            borderWidth: 1, pointRadius: 0, yAxisID: 'yRenew' },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12, maxRotation: 0 } },
+          yPrice:  { position: 'left',  title: { display: true, text: 'p/kWh' }, grid: { drawOnChartArea: false } },
+          yCarbon: { position: 'right', title: { display: true, text: 'gCO₂/kWh' }, grid: { drawOnChartArea: true } },
+          yRenew:  { display: false, min: 0, max: 100 },
+        }
+      }
+    });
+  } catch(e) { console.error('price-carbon', e); noData('chart-price-carbon'); }
+}
+
+// ── Combined best-time heatmap ────────────────────────────────────
+async function loadCombinedHeatmap() {
+  const ctx = document.getElementById('chart-combined-heatmap').getContext('2d');
+  const DAYS  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const HOURS = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+  try {
+    const data = await fetch('/api/combined-heatmap').then(r => r.json());
+    if (!data.length) { noData('chart-combined-heatmap'); return; }
+    function col(score) {
+      const hue = score < 50 ? Math.round(score * 0.7) : Math.round(35 + (score - 50) * 1.7);
+      return `hsl(${hue}, 88%, 36%)`;
+    }
+    const datasets = DAYS.map((day, di) => {
+      const rows = data.filter(d => d.day_of_week === di);
+      return {
+        label: day,
+        data: HOURS.map((_,hi) => { const r = rows.find(d => d.hour_of_day===hi); return r ? r.score : null; }),
+        backgroundColor: HOURS.map((_,hi) => { const r = rows.find(d => d.hour_of_day===hi); return r ? col(r.score) : 'transparent'; }),
+        barPercentage: 1.0, categoryPercentage: 1.0,
+      };
+    });
+    new Chart(ctx, {
+      type: 'bar',
+      data: { labels: HOURS, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
+          tooltip: { callbacks: { label: c => {
+            const row = data.find(d => d.day_of_week === DAYS.indexOf(c.dataset.label) && d.hour_of_day === c.dataIndex);
+            return row ? `${c.dataset.label} ${c.label}: score ${row.score} · ${row.avg_price_p_kwh}p · ${row.avg_carbon} gCO₂` : '';
+          }}}
+        },
+        scales: {
+          x: { ticks: { maxRotation: 90, font: { size: 8 } } },
+          y: { title: { display: true, text: 'Score (100 = cheapest & cleanest)' }, min: 0, max: 100 }
+        }
+      }
+    });
+  } catch(e) { console.error('combined-heatmap', e); noData('chart-combined-heatmap'); }
+}
+
+// ── Price heatmap ─────────────────────────────────────────────────
+async function loadPriceHeatmap() {
+  const ctx = document.getElementById('chart-price-heatmap').getContext('2d');
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const HOURS = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+  try {
+    const data = await fetch('/api/price-heatmap').then(r => r.json());
+    if (!data.length) { noData('chart-price-heatmap'); return; }
+    const vals = data.map(d => d.avg_price_p_kwh);
+    const minV = Math.min(...vals), maxV = Math.max(...vals);
+    function col(v) {
+      const t = (v - minV) / (maxV - minV);
+      return `rgb(${Math.round(34+t*200)},${Math.round(197-t*140)},${Math.round(94+t*40)})`;
+    }
+    const datasets = DAYS.map((day, di) => {
+      const rows = data.filter(d => d.day_of_week === di);
+      return {
+        label: day,
+        data: HOURS.map((_,hi) => { const r = rows.find(d => d.hour_of_day===hi); return r ? r.avg_price_p_kwh : null; }),
+        backgroundColor: HOURS.map((_,hi) => { const r = rows.find(d => d.hour_of_day===hi); return r ? col(r.avg_price_p_kwh) : 'transparent'; }),
+        barPercentage: 1.0, categoryPercentage: 1.0,
+      };
+    });
+    new Chart(ctx, {
+      type: 'bar', data: { labels: HOURS, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label} ${c.label}: ${c.raw}p/kWh` } }
+        },
+        scales: {
+          x: { ticks: { maxRotation: 90, font: { size: 8 } } },
+          y: { title: { display: true, text: 'p/kWh' } }
+        }
+      }
+    });
+  } catch(e) { console.error('price-heatmap', e); noData('chart-price-heatmap'); }
+}
+
+// ── Solar + wind potential ────────────────────────────────────────
+async function loadSolarWind() {
+  const ctx = document.getElementById('chart-solar-wind').getContext('2d');
+  try {
+    const data = await fetch('/api/solar-weather').then(r => r.json());
+    if (!data.length) { noData('chart-solar-wind'); return; }
+    const labels = data.map(d => d.hour_utc.slice(5,13));
+    new Chart(ctx, {
+      type: 'line', data: {
+        labels,
+        datasets: [
+          { label: 'Solar index', data: data.map(d => d.solar_index),
+            borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.12)',
+            borderWidth: 1.5, pointRadius: 0, fill: true },
+          { label: 'Wind power index', data: data.map(d => d.wind_power_index),
+            borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.08)',
+            borderWidth: 1.5, pointRadius: 0, fill: true },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12, maxRotation: 0 } },
+          y: { title: { display: true, text: '0–100 index' }, min: 0, max: 100 }
+        }
+      }
+    });
+  } catch(e) { console.error('solar-wind', e); noData('chart-solar-wind'); }
+}
+
+// ── Temp + precipitation ──────────────────────────────────────────
+async function loadTempPrecip() {
+  const ctx = document.getElementById('chart-temp-precip').getContext('2d');
+  try {
+    const data = await fetch('/api/solar-weather').then(r => r.json());
+    if (!data.length) { noData('chart-temp-precip'); return; }
+    new Chart(ctx, {
+      type: 'line', data: {
+        labels: data.map(d => d.hour_utc.slice(5,13)),
+        datasets: [
+          { label: 'Temp °C', data: data.map(d => d.temp_c),
+            borderColor: '#f97316', borderWidth: 1.5, pointRadius: 0, yAxisID: 'yT' },
+          { label: 'Precip mm', data: data.map(d => d.precipitation_mm),
+            type: 'bar', backgroundColor: 'rgba(56,189,248,0.4)', yAxisID: 'yP' },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+          yT: { position: 'left',  title: { display: true, text: '°C' } },
+          yP: { position: 'right', title: { display: true, text: 'mm' }, grid: { drawOnChartArea: false }, min: 0 },
+        }
+      }
+    });
+  } catch(e) { console.error('temp-precip', e); }
+}
+
+// ── Cloud cover ───────────────────────────────────────────────────
+async function loadCloud() {
+  const ctx = document.getElementById('chart-cloud').getContext('2d');
+  try {
+    const data = await fetch('/api/solar-weather').then(r => r.json());
+    if (!data.length) { noData('chart-cloud'); return; }
+    new Chart(ctx, {
+      type: 'line', data: {
+        labels: data.map(d => d.hour_utc.slice(5,13)),
+        datasets: [{
+          label: 'Cloud cover %', data: data.map(d => d.cloudcover_pct),
+          borderColor: '#94a3b8', backgroundColor: 'rgba(148,163,184,0.15)',
+          borderWidth: 1.5, pointRadius: 0, fill: true,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+          y: { min: 0, max: 100, title: { display: true, text: '%' } }
+        }
+      }
+    });
+  } catch(e) { console.error('cloud', e); }
+}
+
+// ── Wind direction ────────────────────────────────────────────────
+async function loadWindDir() {
+  const ctx = document.getElementById('chart-wind-dir').getContext('2d');
+  try {
+    const data = await fetch('/api/solar-weather').then(r => r.json());
+    if (!data.length) { noData('chart-wind-dir'); return; }
+    new Chart(ctx, {
+      type: 'line', data: {
+        labels: data.map(d => d.hour_utc.slice(5,13)),
+        datasets: [
+          { label: 'Direction°', data: data.map(d => d.wind_direction_deg),
+            borderColor: '#818cf8', borderWidth: 1.5, pointRadius: 0, yAxisID: 'yD' },
+          { label: 'Speed km/h', data: data.map(d => d.windspeed_kmh),
+            borderColor: '#4ade80', borderWidth: 1.5, pointRadius: 0,
+            borderDash: [3,3], yAxisID: 'yS' },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+          yD: { position: 'left',  min: 0, max: 360, title: { display: true, text: 'deg' } },
+          yS: { position: 'right', min: 0, title: { display: true, text: 'km/h' }, grid: { drawOnChartArea: false } },
+        }
+      }
+    });
+  } catch(e) { console.error('wind-dir', e); }
+}
+
+// Boot
+Promise.all([
+  loadHero(),
+  loadKPI(),
+  loadPriceCarbon(),
+  loadCombinedHeatmap(),
+  loadSolarWind(),
+  loadTempPrecip(),
+  loadCloud(),
+  loadWindDir(),
+  loadFuelMix(),
+  loadDonut(),
+  loadInterconn(),
+  loadRenewable(),
+  loadDemandProfile(),
+  loadScatter(),
+  loadStress(),
+]);
+</script>
+</body>
+</html>
