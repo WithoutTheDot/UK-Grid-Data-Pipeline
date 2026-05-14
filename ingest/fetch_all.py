@@ -32,7 +32,7 @@ con.execute("""
     )
 """)
 
-# Extend raw_weather with new columns if not present
+# extra columns added after initial deploy
 for col in [
     "cloudcover varchar",
     "direct_radiation varchar",
@@ -56,12 +56,12 @@ con.execute("""
 
 con.execute("""
     create table if not exists bronze.raw_carbon_national (
-        from_time         varchar,
-        to_time           varchar,
-        intensity_actual  varchar,
+        from_time          varchar,
+        to_time            varchar,
+        intensity_actual   varchar,
         intensity_forecast varchar,
-        intensity_index   varchar,
-        loaded_at         timestamp default current_timestamp
+        intensity_index    varchar,
+        loaded_at          timestamp default current_timestamp
     )
 """)
 
@@ -77,8 +77,7 @@ con.execute("""
 
 results = {}
 
-# --- Elexon BMRS ---
-# Response: list of {startTime, settlementPeriod, data: [{fuelType, generation}]}
+# Elexon BMRS — half-hourly generation by fuel type
 try:
     today = datetime.now(timezone.utc).date().isoformat()
     r = requests.get(
@@ -102,7 +101,7 @@ try:
 except Exception as e:
     results['generation'] = f"ERROR — {e}"
 
-# --- Open-Meteo ---
+# Open-Meteo — hourly weather for Birmingham
 try:
     r = requests.get(
         'https://api.open-meteo.com/v1/forecast',
@@ -135,7 +134,7 @@ try:
 except Exception as e:
     results['weather'] = f"ERROR — {e}"
 
-# --- Carbon Intensity ---
+# Carbon Intensity API — regional
 try:
     r = requests.get(
         'https://api.carbonintensity.org.uk/regional',
@@ -160,9 +159,9 @@ try:
 except Exception as e:
     results['carbon'] = f"ERROR — {e}"
 
-# --- Octopus Agile Prices ---
+# Octopus Agile prices — 48h forward
 try:
-    # Discover current Agile product code dynamically
+    # product code changes periodically, discover it dynamically
     r = requests.get('https://api.octopus.energy/v1/products/',
         params={'is_variable': 'true', 'page_size': 100}, timeout=15)
     r.raise_for_status()
@@ -181,21 +180,20 @@ try:
     r = requests.get(
         f'https://api.octopus.energy/v1/products/{product_code}/electricity-tariffs/{tariff_code}/standard-unit-rates/',
         params={'page_size': 200, 'period_from': period_from, 'period_to': period_to},
-        timeout=15)
+        timeout=15,
+    )
     r.raise_for_status()
     rates = r.json().get('results', [])
-    count = 0
     for rate in rates:
         con.execute(
             "insert into bronze.raw_prices values (?,?,?,?,current_timestamp)",
             [rate['valid_from'], rate['valid_to'], rate['value_inc_vat'], product_code]
         )
-        count += 1
-    results['prices'] = f"OK — {count} rates ({product_code})"
+    results['prices'] = f"OK — {len(rates)} rates ({product_code})"
 except Exception as e:
     results['prices'] = f"ERROR — {e}"
 
-# --- Carbon Intensity (National + Forecast) ---
+# Carbon Intensity API — national + 48h forecast
 try:
     now = datetime.now(timezone.utc)
     future = now + timedelta(hours=48)
@@ -222,6 +220,6 @@ except Exception as e:
 
 print(f"Ingest complete: {datetime.now(timezone.utc).isoformat()}")
 for source, status in results.items():
-    print(f"  {source:12s} {status}")
+    print(f"  {source:16s} {status}")
 
 con.close()
