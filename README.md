@@ -1,44 +1,38 @@
 # UK Energy Grid Dashboard
 
-A side project I built for a family friend who recently switched to Octopus Agile. Prices change every 30 minutes on Agile and they kept asking me when the best time was to charge their EV or run the dishwasher — so I figured I'd just build something rather than keep sending screenshots of spreadsheets. Ended up going a bit further than planned.
+A family friend of ours switched to Octopus Agile last winter, the tariff where the price of electricity changes every half hour depending on demand and what's on the grid. Great in theory. In practice it meant they kept ringing me up asking whether now was a good time to put the washing machine on, and I kept squinting at a spreadsheet to work it out. So I built this instead, mostly over a few weekends, and it rather got away from me.
 
-It pulls live data from four free UK grid APIs, runs it through a small dbt pipeline into DuckDB, and serves it as a FastAPI dashboard. No cloud services, no paid APIs, no database server — just Python and a single file on disk.
+It pulls live data from four free UK grid APIs, pushes it through a small dbt pipeline into DuckDB, and serves the whole thing as a FastAPI dashboard. No cloud services, no paid APIs, no separate database server to stand up. Python and one file on disk.
 
-<img src="docs/screenshots/01-dashboard.png" width="100%" alt="Dashboard" />
-
----
+Could've gone with React and Postgres instead. Didn't, because someone who isn't me has to run this, and every extra moving part is one more thing I'd have to walk them through over the phone.
 
 ## What it does
 
-- Shows the current Agile price, carbon intensity, and renewable % — with a simple 0–100 score for "is right now a good time to use electricity" (the main thing my family friend actually looks at)
-- Picks the cheapest, cleanest window to run an appliance (EV charge, washing machine, dishwasher, heat pump, or custom)
-- Shows the top 5 half-hour slots for today and tomorrow
-- Live generation mix — what's actually on the grid right now (wind, gas, nuclear, interconnectors, etc.)
-- A bunch of charts: price/carbon over time, hour-of-day heatmap, regional carbon intensity, renewable % trend, solar/wind index, temperature vs demand
-- Works on mobile
+The bit that actually gets used is the number at the top: a score from 0 to 100 for whether right now is a good time to use electricity, worked out from the live Agile price and the carbon intensity of the grid. Green and high is good. Red and low means wait twenty minutes.
 
-<img src="docs/screenshots/02-schedule.png" width="100%" alt="Schedule tab" />
+Below that is an appliance planner. Pick EV charge, washing machine, dishwasher, heat pump, or set a custom duration, and it finds the cheapest and cleanest window in the next couple of days. There's also a plain list of the best five half-hour slots for today and tomorrow if you'd rather just look. A slider sits next to the appliance picker: drag it toward "Cost" or "CO2" and every window on the page re-ranks against whichever you care about more. It's a weighted blend of the two rankings, recomputed server-side across the full set of candidate windows on every request, not just whatever five happened to already be on screen (that was a bug for about a day, more on that below).
 
-<img src="docs/screenshots/05-mobile.png" width="390" alt="Mobile" />
+Then there's a pile of charts I added because the data was sitting there and it seemed a shame not to: live generation mix (wind, gas, nuclear, the interconnectors), price against carbon over time, an hour-of-day heatmap, carbon intensity by region, renewable share over the last month, solar and wind indices, temperature against demand. Some of these are more useful than others. I actually check the heatmap most weeks; the regional map I mostly added because it looked cool.
 
----
+There's no login, no accounts, nothing to sign up for. One person needs this to work and that person isn't going to remember a password.
+
+## Screenshots
+
+<img src="docs/screenshots/01-dashboard.jpg" width="100%" alt="Dashboard tab" />
+
+<img src="docs/screenshots/02-schedule.jpg" width="100%" alt="Schedule tab, appliance finder with the cost/CO2 priority slider" />
+
+<img src="docs/screenshots/06-price-carbon.jpg" width="100%" alt="Price vs carbon intensity chart" />
+
+<img src="docs/screenshots/03-about.jpg" width="100%" alt="About tab" />
 
 ## Stack
 
-| | |
-|-|-|
-| Backend | FastAPI + uvicorn (Python 3.12) |
-| Database | DuckDB — single file, no server needed |
-| Pipeline | dbt-core + dbt-duckdb |
-| Frontend | Vanilla JS + Chart.js, plain HTML — no build step |
+FastAPI and uvicorn on Python 3.12. DuckDB for storage, a single file, no server to run, which is about right for something this size. dbt-core with the dbt-duckdb adapter for the transformations. The frontend is plain HTML with vanilla JS and Chart.js, no build step, no npm, no framework to keep patched.
 
-Deliberately kept it simple — my family friend just needs it to work in a browser, not require a degree to run.
+## Running it
 
----
-
-## Running it locally
-
-You'll need Python 3.12+ and pip. Everything else is installed automatically.
+Python 3.12 or newer, and pip. That's the whole prerequisite list.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/uk-energy-grid.git
@@ -46,184 +40,124 @@ cd uk-energy-grid
 pip install -r requirements.txt --break-system-packages
 ```
 
-Then pull the data for the first time:
+Pull the data down for the first time:
 
 ```bash
 bash run_pipeline.sh
 ```
 
-This hits the four APIs and builds `energy.duckdb` from scratch. Takes about 10–20 seconds.
+That hits the four APIs and builds `energy.duckdb` from nothing, ten or twenty seconds usually. You need to do this at least once before the app has anything to show you.
 
-Then start the app:
+Then:
 
 ```bash
 python3 dashboard/app.py
 # → http://localhost:8000
 ```
 
-Or with auto-reload if you're poking around:
+Or with reload on, if you're poking at the code:
 
 ```bash
 python3 -m uvicorn dashboard.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-To keep the data fresh, run the pipeline on a cron every 30 minutes:
+The data goes stale fast (prices are half-hourly), so stick the pipeline on a cron:
 
 ```
 */30 * * * * cd /path/to/uk-energy-grid && bash run_pipeline.sh
 ```
 
----
+One environment variable, and it's optional: `ENERGY_DB_PATH`, defaults to `./energy.duckdb`, controls where the database file lives.
 
-## Environment variables
+## Where the data comes from
 
-There's only one and it's optional:
+All free, none of them need an account:
 
-| Variable | Default | What it does |
-|----------|---------|---------|
-| `ENERGY_DB_PATH` | `./energy.duckdb` | Where to put the database file |
-
----
-
-## Data sources
-
-All free, no sign-up required:
-
-| Source | What I use it for |
-|--------|-------------------|
+| Source | Used for |
+|--------|----------|
 | [Elexon BMRS](https://bmrs.elexon.co.uk/) | Half-hourly generation by fuel type |
-| [Open-Meteo](https://open-meteo.com/) | Weather in Birmingham — solar, wind, temperature |
-| [Carbon Intensity API](https://carbonintensity.org.uk/) | National + regional carbon intensity, 48h forecast |
+| [Open-Meteo](https://open-meteo.com/) | Weather for Birmingham, solar, wind, temperature |
+| [Carbon Intensity API](https://carbonintensity.org.uk/) | National and regional carbon intensity, 48h forecast |
 | [Octopus Energy API](https://developer.octopus.energy/) | Agile half-hourly prices, 48h ahead |
 
----
+Birmingham is hardcoded for the weather because that's where the person using it lives. If you're elsewhere, the coordinates are in `ingest/fetch_all.py`.
 
-## How the pipeline works
+## How the pipeline hangs together
 
-Data flows through three dbt layers into DuckDB:
+Three dbt layers, the standard medallion setup, and it works fine here:
 
 ```
-bronze → raw API responses as views (no changes)
-silver → type-cast, deduplicated
-gold   → joined, aggregated mart tables that the API queries directly
+bronze → raw API responses as views, untouched
+silver → type-cast and deduplicated
+gold   → joined and aggregated mart tables, which is what the API actually queries
 ```
 
-The "window score" used to rank time slots:
+The score that ranks time slots is deliberately simple:
 
 ```
 price_rank  = percent_rank() OVER (ORDER BY price ASC)
 carbon_rank = percent_rank() OVER (ORDER BY carbon ASC)
-score       = (price_rank + carbon_rank) / 2 × 100
+score       = (weight × price_rank + (1 − weight) × carbon_rank) × 100
 ```
 
-100 = cheapest and cleanest available. 0 = avoid. My family friend just looks at the colour and the number — which is kind of the point.
+100 means it's both the cheapest and the cleanest slot going. 0 means don't bother. `weight` defaults to 0.5 (an even split), but the priority slider on the Schedule tab sends whatever you've dragged it to as a `weight` query param, and the server re-ranks the full set of candidate windows against it on every request. It doesn't re-normalise whatever five happen to already be on screen. That was a real bug I shipped and then fixed. Normalising within an already-narrow top-5 subset was blowing tiny real differences up into wildly wrong scores. There's also a mild amplification curve on the weight, pushing it away from 0.5 faster than the slider itself moves, so a small drag actually produces a noticeably different ranking instead of nothing changing until you're near an extreme.
 
----
-
-## Project layout
+## Layout
 
 ```
 ├── dashboard/
-│   ├── app.py          ← FastAPI app, all the API endpoints
+│   ├── app.py           ← FastAPI app, every endpoint lives here
+│   ├── static/
 │   └── templates/
-│       └── index.html  ← the whole frontend (vanilla JS, Chart.js)
+│       └── index.html   ← the entire dashboard frontend
 ├── ingest/
-│   └── fetch_all.py    ← hits the 4 APIs, writes to bronze tables
+│   └── fetch_all.py     ← hits the four APIs, writes to bronze
 ├── models/
-│   ├── bronze/         ← raw views
-│   ├── silver/         ← cleaned models
-│   └── gold/           ← mart tables the app queries
+│   ├── bronze/
+│   ├── silver/
+│   └── gold/
 ├── seeds/
 │   └── region_lookup.csv
-├── run_pipeline.sh     ← ingest + dbt run, called by cron
+├── tests/
+│   └── test_api.py
+├── run_pipeline.sh      ← ingest + dbt run, what cron calls
 ├── requirements.txt
 └── dbt_project.yml
 ```
 
----
+`app.py` is past 1,300 lines now and could stand being split up. It hasn't bothered me enough yet.
 
-## API endpoints
+## Endpoints
 
-All public, no auth:
+The grid data is all public, none of it is personal and none of it is mine to gate:
 
 | Path | Returns |
 |------|---------|
 | `/api/now` | Current price, carbon, renewable %, score, next best window |
-| `/api/windows-by-day` | Top 5 windows for today + tomorrow |
-| `/api/appliance-windows?hours=X` | Best windows for an X-hour block |
+| `/api/windows-by-day?weight=0.5` | Top 5 windows for today and tomorrow, ranked by cost/CO2 weight (0 = all carbon, 1 = all cost) |
+| `/api/appliance-windows?hours=X&weight=0.5` | Best windows for an X-hour block, same weight param |
 | `/api/prices-carbon` | Last 200 half-hourly price + carbon rows |
-| `/api/combined-heatmap` | Price+carbon score by hour × day-of-week |
+| `/api/combined-heatmap` | Score by hour × day-of-week |
 | `/api/best-windows` | Top 10 future windows |
 | `/api/fuel-mix` | Last 48h generation by fuel type |
 | `/api/renewable-mix` | Last 30 days renewable % + weather |
 | `/api/regional-carbon` | Current carbon by UK region |
-| `/api/solar-weather` | Solar/wind index |
-| `/api/temp-vs-demand` | Temperature vs grid demand |
-| `/api/demand-profile` | Avg demand by hour, weekday vs weekend |
-| `/api/grid-stress` | Last 7 days high-carbon events |
-| `/api/interconnectors` | Last 48h interconnector flows |
-| `/api/kpi` | Summary KPIs |
+| `/api/demand-profile` | Average demand by hour, weekday vs weekend |
+| `/api/grid-stress` | Last 7 days of high-carbon events |
+| `/api/kpi` | Summary numbers |
 
----
+## Things that caught me out
 
-## Deploying it
+The dashboard being empty almost always means the pipeline hasn't run, or ran and failed. `bash run_pipeline.sh` and read what it says. Open-Meteo in particular throws the occasional 502 for no reason; running it again usually fixes it.
 
-It's just a Python process and a file — runs fine on any VPS or a cheap cloud instance.
+dbt installs into `~/.local/bin`, and cron can't see it. Cost me an evening working that one out. The pipeline script hardcodes the full path; check yours with `which dbt` and change it if it's different.
 
-For Railway / Fly.io / Render:
-1. Push to GitHub and connect the repo
-2. Start command: `python3 -m uvicorn dashboard.app:app --host 0.0.0.0 --port 8000`
-3. Add a cron job for the pipeline (`bash run_pipeline.sh` every 30 min)
-4. If the filesystem is ephemeral, mount a volume and point `ENERGY_DB_PATH` at it
+BMRS generation data lags by about half an hour, so the current half-hour slot has no generation figures yet and renewable % comes back null. There's a fallback that carries the last known value forward, which is a fudge but an honest one.
 
-For a VPS with systemd:
+There's no solar in the generation mix. That's not a bug, BMRS reports transmission-level output, and almost all UK solar is rooftop or otherwise embedded, so it just doesn't show up. Renewable % here means wind, hydro and biomass.
 
-```ini
-# /etc/systemd/system/ukenergy.service
-[Unit]
-Description=UK Energy Grid Dashboard
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/uk-energy-grid
-ExecStart=python3 -m uvicorn dashboard.app:app --host 0.0.0.0 --port 8000
-Restart=always
-Environment=ENERGY_DB_PATH=/opt/uk-energy-grid/energy.duckdb
-
-[Install]
-WantedBy=multi-user.target
-```
-
----
-
-## Common issues
-
-**Nothing showing on the dashboard**
-
-Run `bash run_pipeline.sh` and see if it errors. Usually it's a flaky API — just run it again.
-
-**`energy.duckdb` not found**
-
-You need to run the pipeline at least once before starting the app. It creates the database file.
-
-**dbt command not found in cron**
-
-dbt ends up in `~/.local/bin/` which cron doesn't see. The pipeline script hardcodes the path — update it if yours is different:
-```bash
-which dbt
-```
-
-**Port 8000 already in use**
-
-```bash
-lsof -i :8000 && kill -9 <PID>
-```
-
----
+And if port 8000 is already taken: `lsof -i :8000`, then kill whatever's squatting on it.
 
 ## Attribution
 
-- Elexon BMRS data © Elexon Ltd
-- Carbon Intensity API — National Grid ESO / University of Oxford / WWF
-- Open-Meteo — CC BY 4.0
-- Octopus Energy API — Octopus Energy Ltd
+Elexon BMRS data © Elexon Ltd. Carbon Intensity API by National Grid ESO, University of Oxford and WWF. Open-Meteo under CC BY 4.0. Octopus Energy API © Octopus Energy Ltd.

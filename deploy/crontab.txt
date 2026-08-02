@@ -1,0 +1,31 @@
+# Data pipeline — runs every 30 minutes
+*/30 * * * * cd /app && python3 ingest/fetch_all.py >> /data/pipeline.log 2>&1
+*/30 * * * * cd /app && /home/ubuntu/.local/bin/dbt run --quiet >> /data/dbt.log 2>&1
+
+# Weekly DuckDB backup to Backblaze B2 (Sunday 02:00)
+# Requires rclone configured with a remote named "b2" and bucket "leccy-backup"
+0 2 * * 0 rclone copy /data/energy.duckdb b2:leccy-backup/energy-$(date +\%Y\%m\%d).duckdb && rclone delete --min-age 35d b2:leccy-backup >> /data/backup.log 2>&1
+
+# Weekly bronze table retention cleanup (Sunday 03:00)
+0 3 * * 0 cd /app && python3 -c "
+import duckdb, os
+con = duckdb.connect(os.getenv('ENERGY_DB_PATH', './energy.duckdb'), read_only=False)
+tables = ['main_bronze.raw_prices', 'main_bronze.raw_carbon', 'main_bronze.raw_generation', 'main_bronze.raw_weather', 'main_bronze.raw_carbon_national']
+for t in tables:
+    con.execute(f'DELETE FROM {t} WHERE fetched_at < now() - INTERVAL 90 DAYS')
+con.close()
+" >> /data/cleanup.log 2>&1
+
+# Weekly app schema cleanup (Sunday 03:05)
+5 3 * * 0 cd /app && python3 -c "
+import duckdb, os
+con = duckdb.connect(os.getenv('ENERGY_DB_PATH', './energy.duckdb'), read_only=False)
+con.execute('DELETE FROM app.login_attempts WHERE attempted_at < now() - INTERVAL 7 DAYS')
+con.execute('DELETE FROM app.user_sessions WHERE expires_at < now()')
+con.execute('DELETE FROM app.password_resets WHERE expires_at < now()')
+con.execute('DELETE FROM app.alert_checker_log WHERE run_at < now() - INTERVAL 30 DAYS')
+con.close()
+" >> /data/cleanup.log 2>&1
+
+# Log rotation — truncate pipeline.log if over 50MB (daily at 04:00)
+0 4 * * * find /data -name "*.log" -size +50M -exec truncate -s 10M {} \;

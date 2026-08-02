@@ -4,6 +4,7 @@ from collections import defaultdict
 
 import duckdb
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -27,6 +28,12 @@ def query(sql: str, params=None) -> list[dict]:
 
 
 app = FastAPI(title="UK Energy Grid")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
@@ -34,52 +41,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return INDEX_HTML
-
-
-@app.get("/api/kpi")
-async def kpi():
-    renewable = query("""
-        select hour_utc::varchar as cleanest_hour,
-               round(renewable_pct, 1) as renewable_pct,
-               round(renewable_pct_7d_avg, 1) as avg_7d
-        from main_gold.mart_renewable_mix
-        where date_trunc('day', hour_utc) = current_date
-        order by renewable_pct desc limit 1
-    """) or query("""
-        select hour_utc::varchar as cleanest_hour,
-               round(renewable_pct, 1) as renewable_pct,
-               round(renewable_pct_7d_avg, 1) as avg_7d
-        from main_gold.mart_renewable_mix
-        order by hour_utc desc limit 1
-    """)
-    demand = query("""
-        select round(avg(total_demand_mw)/1000, 1) as avg_demand_gw,
-               round(max(total_demand_mw)/1000, 1) as peak_demand_gw
-        from main_gold.mart_temp_vs_demand
-        where date_trunc('day', hour_utc) = current_date
-    """)
-    carbon = query("""
-        select round(avg(intensity_actual), 0) as avg_carbon
-        from main_gold.mart_regional_carbon
-    """)
-    stress = query("""
-        select count(*) as stress_hours
-        from main_gold.mart_grid_stress
-        where is_stress_hour = true
-          and date_trunc('day', hour_utc) >= current_date - interval '7 days'
-    """)
-    current_price = query("""
-        select round(value_inc_vat, 2) as current_price_p_kwh
-        from main_gold.mart_price_carbon
-        where period_utc <= current_timestamp
-        order by period_utc desc limit 1
-    """)
-    result = dict(renewable[0] if renewable else {})
-    result.update(demand[0] if demand else {})
-    result.update(carbon[0] if carbon else {})
-    result.update(stress[0] if stress else {})
-    result.update(current_price[0] if current_price else {})
-    return JSONResponse(result)
 
 
 @app.get("/api/now")
@@ -130,8 +91,19 @@ async def now():
     return JSONResponse(rows[0] if rows else {})
 
 
+def amplify_weight(w: float) -> float:
+    """Push a 0..1 cost/CO2 weight away from 0.5 faster than the slider
+    moves, so a small drag off-center already gives a noticeably different
+    ranking. Endpoints (pure cost / pure CO2) are left untouched."""
+    w = max(0.0, min(1.0, w))
+    d = w - 0.5
+    sign = 1 if d > 0 else (-1 if d < 0 else 0)
+    return 0.5 + sign * min(0.5, abs(d) * 1.8)
+
+
 @app.get("/api/appliance-windows")
-async def appliance_windows(hours: float = 2.0):
+async def appliance_windows(hours: float = 2.0, weight: float = 0.5):
+    weight = amplify_weight(weight)
     n = max(1, round(hours * 2))
     rows = query("""
         select period_utc::varchar as period_utc,
@@ -177,14 +149,15 @@ async def appliance_windows(hours: float = 2.0):
     for w in windows:
         ps = (w['avg_price'] - min_p) / p_range
         cs = ((w['avg_carbon'] or min_c) - min_c) / c_range
-        w['score'] = round((1 - (ps * 0.5 + cs * 0.5)) * 100)
+        w['score'] = round((1 - (ps * weight + cs * (1 - weight))) * 100)
 
     windows.sort(key=lambda w: -w['score'])
     return JSONResponse(windows[:5])
 
 
 @app.get("/api/windows-by-day")
-async def windows_by_day():
+async def windows_by_day(weight: float = 0.5):
+    weight = amplify_weight(weight)
     rows = query("""
         select period_utc::varchar as period_utc,
                round(avg(value_inc_vat), 2) as price_p_kwh,
@@ -213,13 +186,13 @@ async def windows_by_day():
             return 0
         ps = (r['price_p_kwh'] - min_p) / p_range
         cs = (r['carbon_gco2_kwh'] - min_c) / c_range
-        return round((1 - (ps * 0.5 + cs * 0.5)) * 100)
+        return round((1 - (ps * weight + cs * (1 - weight))) * 100)
 
     def rec(s):
-        if s >= 75: return 'Excellent — run anything'
-        if s >= 55: return 'Good — go for it'
-        if s >= 35: return 'Fair — non-urgent can wait'
-        return 'Poor — consider waiting'
+        if s >= 75: return 'Excellent, run anything'
+        if s >= 55: return 'Good, go for it'
+        if s >= 35: return 'Fair, non-urgent can wait'
+        return 'Poor, consider waiting'
 
     by_day: dict = {}
     for r in rows:
@@ -293,7 +266,6 @@ async def combined_heatmap():
     return JSONResponse(rows)
 
 
-
 @app.get("/api/fuel-mix")
 async def fuel_mix():
     rows = query("""
@@ -317,7 +289,6 @@ async def fuel_mix():
     return JSONResponse({"labels": hours_seen, "fuels": fuels})
 
 
-
 @app.get("/api/renewable-mix")
 async def renewable_mix():
     rows = query("""
@@ -330,7 +301,6 @@ async def renewable_mix():
         order by r.hour_utc desc limit 720
     """)
     return JSONResponse(list(reversed(rows)))
-
 
 
 @app.get("/api/regional-carbon")
@@ -367,6 +337,52 @@ async def demand_profile():
         order by 1, 2
     """)
     return JSONResponse(rows)
+
+
+@app.get("/api/kpi")
+async def kpi():
+    renewable = query("""
+        select hour_utc::varchar as cleanest_hour,
+               round(renewable_pct, 1) as renewable_pct,
+               round(renewable_pct_7d_avg, 1) as avg_7d
+        from main_gold.mart_renewable_mix
+        where date_trunc('day', hour_utc) = current_date
+        order by renewable_pct desc limit 1
+    """) or query("""
+        select hour_utc::varchar as cleanest_hour,
+               round(renewable_pct, 1) as renewable_pct,
+               round(renewable_pct_7d_avg, 1) as avg_7d
+        from main_gold.mart_renewable_mix
+        order by hour_utc desc limit 1
+    """)
+    demand = query("""
+        select round(avg(total_demand_mw)/1000, 1) as avg_demand_gw,
+               round(max(total_demand_mw)/1000, 1) as peak_demand_gw
+        from main_gold.mart_temp_vs_demand
+        where date_trunc('day', hour_utc) = current_date
+    """)
+    carbon = query("""
+        select round(avg(intensity_actual), 0) as avg_carbon
+        from main_gold.mart_regional_carbon
+    """)
+    stress = query("""
+        select count(*) as stress_hours
+        from main_gold.mart_grid_stress
+        where is_stress_hour = true
+          and date_trunc('day', hour_utc) >= current_date - interval '7 days'
+    """)
+    current_price = query("""
+        select round(value_inc_vat, 2) as current_price_p_kwh
+        from main_gold.mart_price_carbon
+        where period_utc <= current_timestamp
+        order by period_utc desc limit 1
+    """)
+    result = dict(renewable[0] if renewable else {})
+    result.update(demand[0] if demand else {})
+    result.update(carbon[0] if carbon else {})
+    result.update(stress[0] if stress else {})
+    result.update(current_price[0] if current_price else {})
+    return JSONResponse(result)
 
 
 if __name__ == "__main__":

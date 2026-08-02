@@ -1,0 +1,16 @@
+[Unit]
+Description=Leccy Energy API
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/app
+EnvironmentFile=/app/.env
+ExecStart=/usr/local/bin/uvicorn dashboard.app:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

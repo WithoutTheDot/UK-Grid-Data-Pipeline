@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT=/media/goog/Projects/UKEngergy
+PROJECT=/media/goog/Projects1/UKEngergy
 LOG="$PROJECT/pipeline.log"
 
 cd "$PROJECT"

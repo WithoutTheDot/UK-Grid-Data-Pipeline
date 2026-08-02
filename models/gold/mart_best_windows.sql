@@ -7,8 +7,6 @@ with scored as (
         carbon_intensity,
         intensity_index,
         renewable_pct,
-        combined_score,
-        -- Normalise price and carbon within all available future periods
         percent_rank() over (order by value_inc_vat asc)       as price_rank,
         percent_rank() over (order by carbon_intensity asc)    as carbon_rank
     from {{ ref('mart_price_carbon') }}
@@ -36,10 +34,10 @@ select
     round(renewable_pct, 1)                         as renewable_pct,
     round(window_score, 0)                          as window_score,
     case
-        when window_score >= 80 then 'Excellent — run anything'
-        when window_score >= 60 then 'Good — ideal for EV charging'
-        when window_score >= 40 then 'Fair — fine for dishwasher/washing'
-        else                         'Poor — delay if you can'
+        when window_score >= 80 then 'Excellent, run anything'
+        when window_score >= 60 then 'Good, ideal for EV charging'
+        when window_score >= 40 then 'Fair, fine for dishwasher or washing'
+        else                         'Poor, delay if you can'
     end                                             as recommendation
 from ranked
 where rank <= 10

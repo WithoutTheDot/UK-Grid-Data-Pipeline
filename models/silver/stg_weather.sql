@@ -9,13 +9,13 @@ with source as (
 
 cleaned as (
   select
-    cast(time as timestamp)           as hour_utc,
-    cast(temperature_2m as double)    as temp_c,
-    cast(windspeed_10m as double)     as windspeed_kmh,
-        nullif(cloudcover,'')::double          as cloudcover_pct,
-        nullif(direct_radiation,'')::double    as direct_radiation_wm2,
-        nullif(wind_direction_10m,'')::double  as wind_direction_deg,
-        nullif(precipitation,'')::double       as precipitation_mm,
+    cast(time as timestamp)                                as hour_utc,
+    nullif(nullif(temperature_2m, ''), 'None')::double    as temp_c,
+    nullif(nullif(windspeed_10m, ''), 'None')::double     as windspeed_kmh,
+    nullif(nullif(cloudcover, ''), 'None')::double        as cloudcover_pct,
+    nullif(nullif(direct_radiation, ''), 'None')::double  as direct_radiation_wm2,
+    nullif(nullif(wind_direction_10m, ''), 'None')::double as wind_direction_deg,
+    nullif(nullif(precipitation, ''), 'None')::double     as precipitation_mm,
     loaded_at
   from source
   where time is not null

@@ -34,14 +34,7 @@ select
     g.total_mw,
     round(g.renewable_mw / nullif(g.total_mw,0)*100,1) as renewable_pct,
     hour(coalesce(p.period_utc, c.period_utc))          as hour_of_day,
-    dayofweek(coalesce(p.period_utc, c.period_utc))     as day_of_week,
-    case when p.value_inc_vat is not null
-         and c.intensity_best is not null
-         then round(
-             0.5 * (p.value_inc_vat - 5) / nullif(35 - 5, 0) +
-             0.5 * (c.intensity_best - 50) / nullif(400 - 50, 0)
-         , 4)
-    end                                                 as combined_score
+    dayofweek(coalesce(p.period_utc, c.period_utc))     as day_of_week
 from prices p
 full outer join carbon c
     on p.period_utc = c.period_utc

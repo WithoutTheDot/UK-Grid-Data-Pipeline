@@ -278,3 +278,98 @@ def test_kpi_merges_sub_queries(monkeypatch):
     assert data["avg_carbon"] == 187
     assert data["stress_hours"] == 3
     assert data["current_price_p_kwh"] == 14.22
+
+
+# ── /api/prices-carbon ───────────────────────────────────────────────────────
+
+def test_prices_carbon_passthrough(monkeypatch):
+    # query() returns DESC order; endpoint reverses → ASC for the client
+    rows = [
+        {"period_utc": "2024-01-01T00:30:00", "price_p_kwh": 11.0, "carbon_intensity": 190,
+         "intensity_index": "low",      "renewable_pct": 42.0},
+        {"period_utc": "2024-01-01T00:00:00", "price_p_kwh": 12.5, "carbon_intensity": 210,
+         "intensity_index": "moderate", "renewable_pct": 35.0},
+    ]
+    _patch(monkeypatch, rows)
+    r = client.get("/api/prices-carbon")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 2
+    assert data[0]["price_p_kwh"] == 12.5  # earliest period first after reversal
+
+
+def test_prices_carbon_empty_db(monkeypatch):
+    _patch(monkeypatch, [])
+    r = client.get("/api/prices-carbon")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ── /api/renewable-mix ───────────────────────────────────────────────────────
+
+def test_renewable_mix_passthrough(monkeypatch):
+    # query() returns DESC order; endpoint reverses → ASC for the client
+    rows = [
+        {"hour_utc": "2024-01-01T01:00:00", "renewable_pct": 45.0, "renewable_pct_7d_avg": 39.0, "windspeed_kmh": 25.0},
+        {"hour_utc": "2024-01-01T00:00:00", "renewable_pct": 40.0, "renewable_pct_7d_avg": 38.5, "windspeed_kmh": 22.0},
+    ]
+    _patch(monkeypatch, rows)
+    r = client.get("/api/renewable-mix")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 2
+    assert data[0]["renewable_pct"] == 40.0  # earliest hour first after reversal
+
+
+def test_renewable_mix_empty_db(monkeypatch):
+    _patch(monkeypatch, [])
+    r = client.get("/api/renewable-mix")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ── /api/grid-stress ─────────────────────────────────────────────────────────
+
+def test_grid_stress_passthrough(monkeypatch):
+    rows = [
+        {"hour_utc": "2024-01-01T17:00:00", "total_mw": 45000, "renewable_pct": 18.0,
+         "temp_c": 4.0, "windspeed_kmh": 10.0, "is_stress_hour": True,
+         "temp_band": "cold", "day_type": "weekday"},
+    ]
+    _patch(monkeypatch, rows)
+    r = client.get("/api/grid-stress")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["is_stress_hour"] is True
+
+
+def test_grid_stress_empty_db(monkeypatch):
+    _patch(monkeypatch, [])
+    r = client.get("/api/grid-stress")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ── /api/demand-profile ──────────────────────────────────────────────────────
+
+def test_demand_profile_passthrough(monkeypatch):
+    rows = [
+        {"hour_of_day": 8,  "day_type": "weekday", "avg_gw": 38.2, "min_gw": 35.0, "max_gw": 41.0},
+        {"hour_of_day": 8,  "day_type": "weekend", "avg_gw": 30.1, "min_gw": 28.0, "max_gw": 33.0},
+        {"hour_of_day": 18, "day_type": "weekday", "avg_gw": 42.5, "min_gw": 40.0, "max_gw": 46.0},
+    ]
+    _patch(monkeypatch, rows)
+    r = client.get("/api/demand-profile")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 3
+    assert data[0]["hour_of_day"] == 8
+
+
+def test_demand_profile_empty_db(monkeypatch):
+    _patch(monkeypatch, [])
+    r = client.get("/api/demand-profile")
+    assert r.status_code == 200
+    assert r.json() == []
+
