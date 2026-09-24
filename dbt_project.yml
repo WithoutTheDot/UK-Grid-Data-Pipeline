@@ -1,0 +1,28 @@
+name: 'uk_energy_pipeline'
+version: '1.0.0'
+config-version: 2
+
+profile: 'uk_energy_pipeline'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  uk_energy_pipeline:
+    bronze:
+      +schema: bronze
+      +materialized: view
+    silver:
+      +schema: silver
+      +materialized: incremental
+    gold:
+      +schema: gold
+      +materialized: table

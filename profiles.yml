@@ -1,0 +1,7 @@
+uk_energy_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('ENERGY_DB_PATH', 'energy.duckdb') }}"
+      threads: 4

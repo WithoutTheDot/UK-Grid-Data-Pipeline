@@ -1,0 +1,6 @@
+duckdb>=0.10
+dbt-core>=1.7
+dbt-duckdb>=1.7
+requests>=2.31
+fastapi>=0.110
+uvicorn[standard]>=0.27
