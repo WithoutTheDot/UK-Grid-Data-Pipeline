@@ -14,6 +14,8 @@ cd "$PROJECT"
 {
   echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
   python3 ingest/fetch_all.py
+  # region_lookup is tiny; reloading it every run means a fresh clone just works
+  "$DBT" seed --quiet
   "$DBT" run --quiet
   echo "--- done ---"
 } >> "$LOG" 2>&1

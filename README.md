@@ -10,9 +10,9 @@ Could've gone with React and Postgres instead. Didn't, because someone who isn't
 
 The bit that actually gets used is the number at the top: a score from 0 to 100 for whether right now is a good time to use electricity, worked out from the live Agile price and the carbon intensity of the grid. Green and high is good. Red and low means wait twenty minutes.
 
-Below that is an appliance planner. Pick EV charge, washing machine, dishwasher, heat pump, or set a custom duration, and it finds the cheapest and cleanest window in the next couple of days. There's also a plain list of the best five half-hour slots for today and tomorrow if you'd rather just look. A slider sits next to the appliance picker: drag it toward "Cost" or "CO2" and every window on the page re-ranks against whichever you care about more. It's a weighted blend of the two rankings, recomputed server-side across the full set of candidate windows on every request, not just whatever five happened to already be on screen (that was a bug for about a day, more on that below).
+Below that is an appliance planner. Pick EV charge, washing machine, dishwasher, heat pump, or set a custom duration, and it finds the cheapest and cleanest window in the next 36 hours. There's also a plain list of the best five half-hour slots for today and tomorrow if you'd rather just look. A slider sits next to the appliance picker: drag it toward "Cost" or "CO2" and every window on the page re-ranks against whichever you care about more. It's a weighted blend of the two rankings, recomputed server-side across the full set of candidate windows on every request, not just whatever five happened to already be on screen (that was a bug for about a day, more on that below).
 
-Then there's a pile of charts I added because the data was sitting there and it seemed a shame not to: live generation mix (wind, gas, nuclear, the interconnectors), price against carbon over time, an hour-of-day heatmap, renewable share and wind speed over the last month, demand by hour of day, and a timeline of grid stress hours. Some of these are more useful than others. I actually check the heatmap most weeks.
+Then there's a pile of charts I added because the data was sitting there and it seemed a shame not to: live generation mix (wind, gas, nuclear, the interconnectors) plus the last 48 hours of it stacked by fuel, price against carbon over time, a heatmap of the best hours by day of the week, renewable share and wind speed over the last month, demand by hour of day, and a timeline of grid stress hours. Some of these are more useful than others. I actually check the heatmap most weeks.
 
 There's no login, no accounts, nothing to sign up for. One person needs this to work and that person isn't going to remember a password.
 
@@ -46,7 +46,7 @@ Pull the data down for the first time:
 bash run_pipeline.sh
 ```
 
-That hits the four APIs and builds `energy.duckdb` from nothing, ten or twenty seconds usually. You need to do this at least once before the app has anything to show you.
+That hits the four APIs, loads the region lookup table, and builds `energy.duckdb` from nothing, ten or twenty seconds usually. You need to do this at least once before the app has anything to show you.
 
 Then:
 
@@ -67,7 +67,7 @@ The data goes stale fast (prices are half-hourly), so stick the pipeline on a cr
 */30 * * * * cd /path/to/UK-Grid-Data-Pipeline && bash run_pipeline.sh
 ```
 
-Two environment variables, both optional: `ENERGY_DB_PATH`, defaults to `./energy.duckdb`, controls where the database file lives, and `DBT`, the path to the dbt binary if `run_pipeline.sh` can't find it on its own.
+Two environment variables, both optional: `ENERGY_DB_PATH`, defaults to `energy.duckdb` in the repo root, controls where the database file lives, and `DBT`, the path to the dbt binary if `run_pipeline.sh` can't find it on its own.
 
 ## Where the data comes from
 
@@ -91,6 +91,8 @@ bronze → raw API responses as views, untouched
 silver → type-cast and deduplicated
 gold   → joined and aggregated mart tables, which is what the API actually queries
 ```
+
+There's also one seed, `seeds/region_lookup.csv`, which maps the Carbon Intensity API's region IDs to proper names. `run_pipeline.sh` reloads it on every run before `dbt run`, since it's only fourteen rows.
 
 The score that ranks time slots is deliberately simple:
 
@@ -117,15 +119,28 @@ score       = (1 − (weight × price_rank + (1 − weight) × carbon_rank)) × 
 │   └── gold/
 ├── seeds/
 │   └── region_lookup.csv
+├── analyses/
+│   └── temp_demand_regression.sql  ← how much demand rises per degree colder
 ├── tests/
 │   ├── test_api.py      ← endpoints, with the database mocked out
 │   └── test_models.py   ← runs the gold SQL against a tiny in-memory table
-├── run_pipeline.sh      ← ingest + dbt run, what cron calls
+├── docs/screenshots/    ← the images in this README
+├── run_pipeline.sh      ← ingest, dbt seed + run, what cron calls
 ├── requirements.txt
-└── dbt_project.yml
+├── dbt_project.yml
+└── profiles.yml         ← points dbt at the DuckDB file
 ```
 
 Every endpoint lives in `app.py`, which is fine at around 400 lines. If it keeps growing it'll want splitting up.
+
+## Tests
+
+```bash
+pip install pytest --break-system-packages
+python3 -m pytest
+```
+
+`test_api.py` covers every endpoint with the database mocked out, so it doesn't need the pipeline to have run. `test_models.py` runs the real gold SQL against a tiny in-memory table, which catches things like a model ranking windows backwards.
 
 ## Endpoints
 
@@ -143,7 +158,7 @@ The grid data is all public, none of it is personal and none of it is mine to ga
 | `/api/renewable-mix` | Last 30 days renewable % + weather |
 | `/api/regional-carbon` | Current carbon by UK region |
 | `/api/demand-profile` | Average demand by hour, weekday vs weekend |
-| `/api/grid-stress` | Last 7 days of high-carbon events |
+| `/api/grid-stress` | Last 7 days, hourly, with stress hours flagged (cold, calm, 4–8pm, renewables under 30%) |
 | `/api/kpi` | Summary numbers |
 
 ## Things that caught me out

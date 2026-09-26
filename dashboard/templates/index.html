@@ -1106,9 +1106,12 @@ async function loadDonut() {
       const neg = mw < 0;
       const col = FUEL_COLORS[ft] || '#94a3b8';
       const lbl = FUEL_LABELS[ft] || ft;
+      // negative pumped storage means it's pumping water uphill, i.e. using power
+      const note = neg && STORAGE.includes(ft)
+        ? ' <span style="color:var(--muted);font-size:.72rem">↑ pumping</span>' : '';
       return `<div class="fuel-row${neg ? ' negative' : ''}">
         <div class="fuel-row-swatch" style="background:${col}"></div>
-        <div class="fuel-row-name">${lbl}</div>
+        <div class="fuel-row-name">${lbl}${note}</div>
         <div class="fuel-row-gw">${neg ? '−' : ''}${gw}GW</div>
         <div class="fuel-row-pct">${pct}%</div>
       </div>`;
@@ -1138,7 +1141,8 @@ async function loadDonut() {
     const fossilMW = groupMW(FOSSIL);
     const renewMW2 = groupMW(RENEWABLES);
     const otherMW  = groupMW([...LOW_CARBON, 'OTHER']);
-    const storageMW = groupMW(STORAGE);
+    // net, not positive-only: when it's pumping the header should match the row
+    const storageMW = Math.abs(raw.filter(e => STORAGE.includes(e.ft)).reduce((s, e) => s + e.mw, 0));
 
     document.getElementById('snapshot-groups').innerHTML =
       buildGroup('fossil',    'Fossil fuels', groupPct(fossilMW), FOSSIL) +
